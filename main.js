@@ -12,6 +12,7 @@ const {
 } = require("./src/database");
 const { hashPassword, verifyPassword } = require("./src/auth");
 const { sendEmail } = require("./src/helpers");
+const { registerAppUpdater } = require("./src/electronUpdater");
 
 let mainWindow;
 let db;
@@ -125,6 +126,12 @@ function generatePasswordResetCode() {
 
 app.whenReady().then(() => {
   db = initDatabase(app);
+  registerAppUpdater({
+    app,
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    getIsAdmin: () => currentSession?.role === "admin",
+  });
   createWindow();
 
   app.on("activate", () => {
@@ -840,3 +847,4 @@ ipcMain.handle("users:delete", async (_event, { id }) => {
   userQueries.deleteUser(db, targetId);
   return { ok: true };
 });
+

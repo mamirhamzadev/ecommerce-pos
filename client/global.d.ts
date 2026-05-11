@@ -1,5 +1,20 @@
 export {};
 
+type UpdaterPushPayload =
+  | { type: 'checking' }
+  | { type: 'update-available'; info: UpdaterUpdateInfo | null }
+  | { type: 'update-not-available'; info: UpdaterUpdateInfo | null }
+  | { type: 'download-progress'; percent: number; transferred: number; total: number; bytesPerSecond: number }
+  | { type: 'update-downloaded'; info: UpdaterUpdateInfo | null }
+  | { type: 'error'; message: string };
+
+type UpdaterUpdateInfo = {
+  version: string;
+  releaseDate: string;
+  releaseNotes: string;
+  path: string;
+};
+
 type UserPermissions = {
   canCreateProduct: boolean;
   canEditProduct: boolean;
@@ -86,7 +101,10 @@ declare global {
           | 'orders:create'
           | 'orders:update'
           | 'orders:patchStatus'
-          | 'orders:delete',
+          | 'orders:delete'
+          | 'app:updaterInfo'
+          | 'app:updaterCheck'
+          | 'app:updaterQuitAndInstall',
         payload?: unknown,
       ) => Promise<unknown>;
       login: (payload: { username: string; password: string }) => Promise<
@@ -315,6 +333,28 @@ declare global {
         status: string;
       }) => Promise<{ ok: true } | { ok: false; error?: string }>;
       deleteOrder: (payload: { id: number }) => Promise<{ ok: true } | { ok: false; error?: string }>;
+      getUpdaterInfo: () => Promise<
+        | { ok: true; isPackaged: boolean; currentVersion: string }
+        | { ok: false; error?: string }
+      >;
+      checkAppUpdates: () => Promise<
+        | {
+            ok: true;
+            mode: 'dev';
+            currentVersion: string;
+            message: string;
+          }
+        | {
+            ok: true;
+            mode: 'packaged';
+            currentVersion: string;
+            isUpdateAvailable: boolean;
+            updateInfo: UpdaterUpdateInfo | null;
+          }
+        | { ok: false; error?: string; currentVersion?: string }
+      >;
+      quitAndInstallUpdate: () => Promise<{ ok: true } | { ok: false; error?: string }>;
+      onUpdaterEvent: (callback: (payload: UpdaterPushPayload) => void) => () => void;
     };
   }
 }

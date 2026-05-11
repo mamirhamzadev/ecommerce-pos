@@ -1,5 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+const UPDATER_EVENT = 'app:updater-event';
+
 const ALLOWED_CHANNELS = new Set([
   'auth:login',
   'auth:forgotRequest',
@@ -26,6 +28,9 @@ const ALLOWED_CHANNELS = new Set([
   'orders:update',
   'orders:patchStatus',
   'orders:delete',
+  'app:updaterInfo',
+  'app:updaterCheck',
+  'app:updaterQuitAndInstall',
 ]);
 
 function invoke(channel, payload) {
@@ -63,4 +68,19 @@ contextBridge.exposeInMainWorld('api', {
   updateOrder: (payload) => invoke('orders:update', payload),
   patchOrderStatus: (payload) => invoke('orders:patchStatus', payload),
   deleteOrder: (payload) => invoke('orders:delete', payload),
+  getUpdaterInfo: () => invoke('app:updaterInfo'),
+  checkAppUpdates: () => invoke('app:updaterCheck'),
+  quitAndInstallUpdate: () => invoke('app:updaterQuitAndInstall'),
+  onUpdaterEvent: (callback) => {
+    if (typeof callback !== 'function') {
+      return () => {};
+    }
+    const handler = (_event, data) => {
+      callback(data);
+    };
+    ipcRenderer.on(UPDATER_EVENT, handler);
+    return () => {
+      ipcRenderer.removeListener(UPDATER_EVENT, handler);
+    };
+  },
 });

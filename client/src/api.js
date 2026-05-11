@@ -7,12 +7,18 @@ function wrapApi(raw) {
   const needsPermPatch =
     typeof raw.getUserPermissions !== 'function' ||
     typeof raw.updateUserPermissions !== 'function';
+  const needsUpdaterPatch =
+    typeof raw.getUpdaterInfo !== 'function' ||
+    typeof raw.checkAppUpdates !== 'function' ||
+    typeof raw.quitAndInstallUpdate !== 'function' ||
+    typeof raw.onUpdaterEvent !== 'function';
   if (
     !needsUserPatch &&
     !needsPickerPatch &&
     !needsPasswordPatch &&
     !needsAdminCodePatch &&
-    !needsPermPatch
+    !needsPermPatch &&
+    !needsUpdaterPatch
   ) {
     return raw;
   }
@@ -45,6 +51,17 @@ function wrapApi(raw) {
               raw.invoke('users:getPermissions', payload),
             updateUserPermissions: (payload) =>
               raw.invoke('users:updatePermissions', payload),
+          }
+        : {}),
+      ...(needsUpdaterPatch
+        ? {
+            getUpdaterInfo: () => raw.invoke('app:updaterInfo'),
+            checkAppUpdates: () => raw.invoke('app:updaterCheck'),
+            quitAndInstallUpdate: () => raw.invoke('app:updaterQuitAndInstall'),
+            onUpdaterEvent:
+              typeof raw.onUpdaterEvent === 'function'
+                ? (cb) => raw.onUpdaterEvent(cb)
+                : () => () => {},
           }
         : {}),
     };
@@ -107,12 +124,36 @@ function wrapApi(raw) {
             ),
         }
       : {}),
+    ...(needsUpdaterPatch
+      ? {
+          getUpdaterInfo: () =>
+            Promise.reject(
+              new Error(
+                'Updater requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
+          checkAppUpdates: () =>
+            Promise.reject(
+              new Error(
+                'Updater requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
+          quitAndInstallUpdate: () =>
+            Promise.reject(
+              new Error(
+                'Updater requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
+          onUpdaterEvent: () => () => {},
+        }
+      : {}),
   };
 }
 
+/** @returns {Window['api']} */
 export function getApi() {
   if (!window.api) {
     throw new Error('Preload bridge missing: run inside Electron.');
   }
-  return wrapApi(window.api);
+  return /** @type {Window['api']} */ (wrapApi(window.api));
 }

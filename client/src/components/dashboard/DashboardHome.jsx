@@ -20,6 +20,17 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [uInfo, setUInfo] = useState(null);
+  const [updaterErr, setUpdaterErr] = useState('');
+  const [uCheckLoading, setUCheckLoading] = useState(false);
+  const [uProgress, setUProgress] = useState(null);
+  const [uPhase, setUPhase] = useState(
+    /** @type {'idle' | 'checking' | 'dev' | 'available' | 'latest' | 'downloaded' | 'error'} */ (
+      'idle'
+    ),
+  );
+  const [uRemote, setURemote] = useState(null);
+  const [uDevMessage, setUDevMessage] = useState('');
 
   const load = useCallback(async () => {
     setError('');
@@ -38,6 +49,115 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
       load();
     }
   }, [active, load]);
+
+  const runUpdateCheck = useCallback(async () => {
+    if (!isAdmin) return;
+    setUpdaterErr('');
+    setUDevMessage('');
+    setUCheckLoading(true);
+    setUPhase('checking');
+    setUProgress(null);
+    try {
+      const r = await getApi().checkAppUpdates();
+      setUCheckLoading(false);
+      if (r.ok !== true) {
+        setUpdaterErr(r.error || 'Could not check for updates.');
+        setUPhase('idle');
+        return;
+      }
+      if (r.mode === 'dev') {
+        setUPhase('dev');
+        setUDevMessage(r.message || '');
+        return;
+      }
+      if (!r.isUpdateAvailable) {
+        setUPhase('latest');
+        setURemote(r.updateInfo);
+        setUProgress(null);
+      } else {
+        setUPhase('available');
+        setURemote(r.updateInfo);
+      }
+    } catch (e) {
+      setUCheckLoading(false);
+      setUpdaterErr(e instanceof Error ? e.message : 'Could not check for updates.');
+      setUPhase('idle');
+    }
+  }, [isAdmin]);
+
+  const quitAndInstall = useCallback(async () => {
+    setUpdaterErr('');
+    try {
+      const r = await getApi().quitAndInstallUpdate();
+      if (r.ok !== true) {
+        setUpdaterErr(r.error || 'Could not restart the app.');
+      }
+    } catch (e) {
+      setUpdaterErr(e instanceof Error ? e.message : 'Could not restart the app.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active || !isAdmin) {
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await getApi().getUpdaterInfo();
+        if (cancelled) return;
+        if (r.ok === true) {
+          setUInfo(r);
+        } else {
+          setUpdaterErr(r.error || '');
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setUpdaterErr(e instanceof Error ? e.message : '');
+        }
+      }
+    })();
+
+    const api = getApi();
+    const unsub =
+      typeof api.onUpdaterEvent === 'function'
+        ? api.onUpdaterEvent((payload) => {
+            if (!payload || typeof payload !== 'object') return;
+            const t = /** @type {{ type?: string }} */ (payload).type;
+            if (t === 'checking') {
+              setUPhase('checking');
+            }
+            if (t === 'update-available') {
+              setUPhase('available');
+              setURemote(/** @type {{ info?: unknown }} */ (payload).info ?? null);
+            }
+            if (t === 'update-not-available') {
+              setUPhase('latest');
+              setURemote(/** @type {{ info?: unknown }} */ (payload).info ?? null);
+              setUProgress(null);
+            }
+            if (t === 'download-progress') {
+              const p = /** @type {{ percent?: number }} */ (payload).percent;
+              setUProgress(typeof p === 'number' ? p : 0);
+            }
+            if (t === 'update-downloaded') {
+              setUPhase('downloaded');
+              setUProgress(100);
+              setURemote(/** @type {{ info?: unknown }} */ (payload).info ?? null);
+            }
+            if (t === 'error') {
+              setUPhase('error');
+              setUpdaterErr(/** @type {{ message?: string }} */ (payload).message || 'Update error');
+              setUProgress(null);
+            }
+          })
+        : () => {};
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [active, isAdmin]);
 
   if (!active) {
     return null;
@@ -133,6 +253,96 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
             <span className="stat-card-hint">Staff accounts</span>
           </button>
         </div>
+      ) : null}
+
+      {isAdmin ? (
+        <section className="card dash-panel dash-panel-wide" style={{ marginTop: '1rem' }}>
+          <div className="dash-panel-head">
+            <h3 className="section-title section-title-sm">Software update</h3>
+            <div className="dash-panel-head-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={runUpdateCheck}
+                disabled={uCheckLoading}
+              >
+                {uCheckLoading ? 'Checking…' : 'Check for updates'}
+              </button>
+            </div>
+          </div>
+          {updaterErr ? (
+            <div className="alert alert-error" role="alert">
+              {updaterErr}
+            </div>
+          ) : null}
+          {uInfo?.ok === true ? (
+            <p className="section-desc section-desc-tight" style={{ marginTop: 0 }}>
+              Installed version <strong className="cell-mono">{uInfo.currentVersion}</strong>
+              {uInfo.isPackaged ? '' : ' — this session is a development build (not updatable).'}
+            </p>
+          ) : null}
+          {uPhase === 'dev' ? (
+            <p className="empty-hint" style={{ margin: '0.5rem 0 0' }}>
+              {uDevMessage ||
+                'Updates use electron-updater against GitHub Releases only in the packaged installer.'}{' '}
+              Run <span className="cell-mono">npm run dist</span>, install from <span className="cell-mono">release/</span>, then open that app.
+            </p>
+          ) : null}
+          {uPhase === 'checking' && uInfo?.isPackaged && !updaterErr ? (
+            <p className="empty-hint" style={{ marginTop: '0.5rem' }}>
+              Contacting update server…
+            </p>
+          ) : null}
+          {(uPhase === 'available' ||
+            (typeof uProgress === 'number' && uProgress >= 0 && uProgress < 100)) &&
+          uInfo?.isPackaged ? (
+            <div style={{ marginTop: '0.75rem' }}>
+              <p className="section-desc section-desc-tight" style={{ marginTop: 0 }}>
+                Downloading{' '}
+                {uRemote && typeof uRemote === 'object' && 'version' in uRemote ? (
+                  <strong className="cell-mono">{String(uRemote.version)}</strong>
+                ) : (
+                  'update'
+                )}
+                …
+              </p>
+              <progress
+                className="dash-update-progress"
+                value={uProgress ?? 0}
+                max={100}
+                style={{ width: '100%', marginTop: '0.5rem' }}
+              />
+            </div>
+          ) : null}
+          {uPhase === 'latest' && uInfo?.isPackaged ? (
+            <p className="empty-hint" style={{ marginTop: '0.5rem' }}>
+              You are on the latest published release (or newer than GitHub).
+            </p>
+          ) : null}
+          {uPhase === 'downloaded' ? (
+            <div className="alert alert-success" role="status" style={{ marginTop: '0.75rem' }}>
+              <p style={{ margin: 0 }}>Update downloaded. Restart now to finish installing.</p>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                style={{ marginTop: '0.5rem' }}
+                onClick={quitAndInstall}
+              >
+                Restart and install
+              </button>
+            </div>
+          ) : null}
+          {uInfo?.ok === true && uInfo.isPackaged ? (
+            <p className="empty-hint" style={{ marginTop: '0.75rem' }}>
+              Built with <strong>electron-updater</strong> + <strong>electron-builder</strong>. Set{' '}
+              <span className="cell-mono">GITHUB_RELEASE_REPO=owner/repo</span> when running{' '}
+              <span className="cell-mono">npm run dist</span> so the app knows which GitHub project to
+              read. Private repos: set <span className="cell-mono">GITHUB_TOKEN</span> or{' '}
+              <span className="cell-mono">GH_TOKEN</span> for this machine user (see electron-updater
+              docs).
+            </p>
+          ) : null}
+        </section>
       ) : null}
 
       <div className={`dash-panels${isAdmin ? '' : ' dash-panels-user-only'}`}>
