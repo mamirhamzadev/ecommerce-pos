@@ -69,6 +69,7 @@ function wireAutoUpdater(opts) {
       owner: gh.owner,
       repo: gh.repo,
       private: true,
+      token: process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim(),
     });
   }
 
