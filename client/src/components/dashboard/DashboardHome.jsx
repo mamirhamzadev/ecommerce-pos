@@ -334,12 +334,13 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
           ) : null}
           {uInfo?.ok === true && uInfo.isPackaged ? (
             <p className="empty-hint" style={{ marginTop: '0.75rem' }}>
-              Built with <strong>electron-updater</strong> + <strong>electron-builder</strong>. Set{' '}
-              <span className="cell-mono">GITHUB_RELEASE_REPO=owner/repo</span> when running{' '}
-              <span className="cell-mono">npm run dist</span> so the app knows which GitHub project to
-              read. Private repos: set <span className="cell-mono">GITHUB_TOKEN</span> or{' '}
-              <span className="cell-mono">GH_TOKEN</span> for this machine user (see electron-updater
-              docs).
+              Built with <strong>electron-updater</strong> + <strong>electron-builder</strong>. The
+              installed app reads GitHub <span className="cell-mono">repository</span> from{' '}
+              <span className="cell-mono">package.json</span> first; optional{' '}
+              <span className="cell-mono">GITHUB_RELEASE_REPO</span> in <span className="cell-mono">.env</span>{' '}
+              overrides in dev or as a fallback when packaged. Private repos:{' '}
+              <span className="cell-mono">GITHUB_TOKEN</span> / <span className="cell-mono">GH_TOKEN</span>{' '}
+              on the machine (see electron-updater docs).
             </p>
           ) : null}
         </section>

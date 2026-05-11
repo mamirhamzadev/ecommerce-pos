@@ -1,13 +1,14 @@
 const path = require("path");
+const {
+  parseGithubReleaseRepoInput,
+  parseGithubReleaseRepoFromPackageJsonPath,
+} = require("./src/githubReleaseRepo");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 function parseGithubRepo() {
-  const raw = process.env.GITHUB_RELEASE_REPO?.trim();
-  if (!raw) return null;
-  const cleaned = raw.replace(/^https?:\/\/github\.com\//i, "");
-  const parts = cleaned.split("/").filter(Boolean);
-  if (parts.length < 2) return null;
-  return { owner: parts[0], repo: parts[1].replace(/\.git$/i, "") };
+  const fromEnv = parseGithubReleaseRepoInput(process.env.GITHUB_RELEASE_REPO?.trim());
+  if (fromEnv) return fromEnv;
+  return parseGithubReleaseRepoFromPackageJsonPath(path.join(__dirname, "package.json"));
 }
 
 const gh = parseGithubRepo();

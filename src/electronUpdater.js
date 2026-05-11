@@ -1,4 +1,9 @@
+const path = require("path");
 const { autoUpdater } = require("electron-updater");
+const {
+  parseGithubReleaseRepoInput,
+  parseGithubReleaseRepoFromPackageJsonPath,
+} = require("./githubReleaseRepo");
 
 let updateDownloaded = false;
 
@@ -42,11 +47,24 @@ function broadcast(getMainWindow, payload) {
  * @param {() => import("electron").BrowserWindow | null | undefined} opts.getMainWindow
  */
 function wireAutoUpdater(opts) {
-  const { getMainWindow } = opts;
+  const { app, getMainWindow } = opts;
 
   const token = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
   if (token && !process.env.GH_TOKEN) {
     process.env.GH_TOKEN = token;
+  }
+
+  const fromEnv = parseGithubReleaseRepoInput(process.env.GITHUB_RELEASE_REPO?.trim());
+  const pkgPath = path.join(app.getAppPath(), "package.json");
+  const fromPkg = parseGithubReleaseRepoFromPackageJsonPath(pkgPath);
+  /** Installed app: prefer committed `repository` so updates match the real release repo. Dev: `.env` overrides. */
+  const gh = app.isPackaged ? fromPkg || fromEnv : fromEnv || fromPkg;
+  if (gh) {
+    autoUpdater.setFeedURL({
+      provider: "github",
+      owner: gh.owner,
+      repo: gh.repo,
+    });
   }
 
   autoUpdater.autoDownload = true;
@@ -165,7 +183,7 @@ function registerUpdaterIpc(ipcMain, app, auth) {
  * @param {() => boolean} opts.getIsAdmin
  */
 function registerAppUpdater(opts) {
-  wireAutoUpdater(opts);
+  wireAutoUpdater({ app: opts.app, getMainWindow: opts.getMainWindow });
   registerUpdaterIpc(opts.ipcMain, opts.app, {
     getMainWindow: opts.getMainWindow,
     getIsAdmin: opts.getIsAdmin,

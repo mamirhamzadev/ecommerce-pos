@@ -2,6 +2,10 @@
   "name": "pos-mushtaq",
   "version": "1.0.0",
   "description": "Electron POS shell with SQLite auth (admin / user)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mamirhamzadev/ecommerce-pos.git"
+  },
   "main": "main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
