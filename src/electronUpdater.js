@@ -16,7 +16,8 @@ function serializeUpdateInfo(info) {
     notes = notes
       .map((n) => {
         if (typeof n === "string") return n;
-        if (n && typeof n === "object" && "note" in n) return String(/** @type {{ note?: string }} */ (n).note);
+        if (n && typeof n === "object" && "note" in n)
+          return String(/** @type {{ note?: string }} */ (n).note);
         return "";
       })
       .join("\n");
@@ -49,12 +50,15 @@ function broadcast(getMainWindow, payload) {
 function wireAutoUpdater(opts) {
   const { app, getMainWindow } = opts;
 
-  const token = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
+  const token =
+    process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
   if (token && !process.env.GH_TOKEN) {
     process.env.GH_TOKEN = token;
   }
 
-  const fromEnv = parseGithubReleaseRepoInput(process.env.GITHUB_RELEASE_REPO?.trim());
+  const fromEnv = parseGithubReleaseRepoInput(
+    process.env.GITHUB_RELEASE_REPO?.trim(),
+  );
   const pkgPath = path.join(app.getAppPath(), "package.json");
   const fromPkg = parseGithubReleaseRepoFromPackageJsonPath(pkgPath);
   /** Installed app: prefer committed `repository` so updates match the real release repo. Dev: `.env` overrides. */
@@ -64,6 +68,7 @@ function wireAutoUpdater(opts) {
       provider: "github",
       owner: gh.owner,
       repo: gh.repo,
+      private: true,
     });
   }
 
@@ -145,7 +150,9 @@ function registerUpdaterIpc(ipcMain, app, auth) {
         mode: "packaged",
         currentVersion: app.getVersion(),
         isUpdateAvailable: Boolean(result?.isUpdateAvailable),
-        updateInfo: result?.updateInfo ? serializeUpdateInfo(result.updateInfo) : null,
+        updateInfo: result?.updateInfo
+          ? serializeUpdateInfo(result.updateInfo)
+          : null,
       };
     } catch (e) {
       return {

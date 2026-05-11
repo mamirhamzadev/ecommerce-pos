@@ -4,7 +4,9 @@
   "description": "Electron POS shell with SQLite auth (admin / user)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mamirhamzadev/ecommerce-pos.git"
+    "url": "https://github.com/mamirhamzadev/ecommerce-pos.git",
+    "owner": "mamirhamzadev",
+    "repo": "ecommerce-pos"
   },
   "main": "main.js",
   "scripts": {
