@@ -4,6 +4,7 @@ const {
   parseGithubReleaseRepoInput,
   parseGithubReleaseRepoFromPackageJsonPath,
 } = require("./githubReleaseRepo");
+require("dotenv").config();
 
 let updateDownloaded = false;
 
