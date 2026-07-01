@@ -1,15 +1,43 @@
-/* Hidden on screen; full A4 sheet when printing */
+/* Hidden on screen; portaled to body for clean multi-page print */
 @media screen {
   .invoice-print-root {
     position: fixed;
     left: -10000px;
     top: 0;
     width: 210mm;
-    height: 297mm;
     pointer-events: none;
     opacity: 0;
     overflow: hidden;
   }
+}
+
+.invoice-print-page {
+  box-sizing: border-box;
+  width: 210mm;
+  height: 297mm;
+  min-height: 297mm;
+  max-height: 297mm;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.invoice-print-form-page {
+  line-height: 0;
+}
+
+.invoice-print-form-img {
+  display: block;
+  width: 210mm;
+  height: 297mm;
+  margin: 0;
+  padding: 0;
+  object-fit: fill;
+}
+
+.invoice-print-invoice-page {
+  overflow: hidden;
 }
 
 .invoice-sheet {
@@ -517,32 +545,40 @@
   html,
   body {
     width: 210mm;
-    height: 297mm;
+    height: auto;
     margin: 0 !important;
     padding: 0 !important;
-    overflow: hidden;
+    overflow: visible;
     background: #fff !important;
   }
 
-  body * {
-    visibility: hidden;
-  }
-
-  .invoice-print-root,
-  .invoice-print-root * {
-    visibility: visible;
+  /* Hide the app shell entirely — print root is portaled to body */
+  body > *:not(.invoice-print-root) {
+    display: none !important;
   }
 
   .invoice-print-root {
-    position: fixed;
-    left: 0;
-    top: 0;
+    display: block !important;
+    position: static;
     width: 210mm;
-    height: 297mm;
+    height: auto;
+    margin: 0;
+    padding: 0;
     opacity: 1;
     pointer-events: none;
-    overflow: hidden;
-    z-index: 99999;
+    overflow: visible;
+  }
+
+  .invoice-print-page {
+    page-break-after: always;
+    break-after: page;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .invoice-print-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
   }
 
   .invoice-sheet {

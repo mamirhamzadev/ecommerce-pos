@@ -1,7 +1,27 @@
+import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { APP_NAME } from '../appName';
 import { parseDbTimestamp } from '../RelativeTime';
+import postFormPage1 from '../assets/print/post-form-page-1.png';
+import postFormPage2 from '../assets/print/post-form-page-2.png';
 import '../invoice-print.css';
+
+const PRINT_FORM_PAGES = [postFormPage1, postFormPage2];
+
+/** Preload postal form scans so pages 1–2 are ready before window.print(). */
+export function preloadPrintFormPages() {
+  return Promise.all(
+    PRINT_FORM_PAGES.map(
+      (src) =>
+        new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = src;
+        }),
+    ),
+  );
+}
 
 const pkr = new Intl.NumberFormat('en-PK', {
   style: 'currency',
@@ -155,8 +175,15 @@ export function InvoicePrintView({ invoice }) {
   const orderNo = String(invoice.order_number || '').trim();
   const qrPayload = buildInvoiceQrPayload(orderNo, trackingId);
 
-  return (
+  const content = (
     <div className="invoice-print-root" aria-hidden="true">
+      <div className="invoice-print-page invoice-print-form-page">
+        <img src={postFormPage1} alt="" className="invoice-print-form-img" />
+      </div>
+      <div className="invoice-print-page invoice-print-form-page">
+        <img src={postFormPage2} alt="" className="invoice-print-form-img" />
+      </div>
+      <div className="invoice-print-page invoice-print-invoice-page">
       <article className="invoice-sheet">
         <div className="invoice-sheet-body">
           <header className="invoice-sheet-header">
@@ -332,6 +359,9 @@ export function InvoicePrintView({ invoice }) {
           </footer>
         </div>
       </article>
+      </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }

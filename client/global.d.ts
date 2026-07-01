@@ -1,5 +1,10 @@
 export {};
 
+declare module '*.png' {
+  const src: string;
+  export default src;
+}
+
 type UpdaterPushPayload =
   | { type: 'checking' }
   | { type: 'update-available'; info: UpdaterUpdateInfo | null }

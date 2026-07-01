@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getApi } from '../api';
 import { FaIcon } from '../components/FaIcon';
-import { InvoicePrintView } from '../components/InvoicePrintView';
+import { InvoicePrintView, preloadPrintFormPages } from '../components/InvoicePrintView';
 import { RelativeTime } from '../RelativeTime';
 import { notifyError } from '../lib/notify';
 import {
@@ -52,13 +52,21 @@ function Invoices() {
   useEffect(() => {
     if (!printInvoice || printTriggered.current) return undefined;
     printTriggered.current = true;
-    const frame = requestAnimationFrame(() => {
-      window.print();
-      setPrintInvoice(null);
-      setPrintingId(null);
-      printTriggered.current = false;
+    let cancelled = false;
+    preloadPrintFormPages().then(() => {
+      if (cancelled) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.print();
+          setPrintInvoice(null);
+          setPrintingId(null);
+          printTriggered.current = false;
+        });
+      });
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelled = true;
+    };
   }, [printInvoice]);
 
   const handlePrint = async (inv) => {

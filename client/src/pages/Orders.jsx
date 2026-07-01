@@ -124,7 +124,7 @@ import {
 } from '../lib/tw';
 import { RelativeTime } from '../RelativeTime';
 import { FaIcon } from '../components/FaIcon';
-import { InvoicePrintView } from '../components/InvoicePrintView';
+import { InvoicePrintView, preloadPrintFormPages } from '../components/InvoicePrintView';
 
 const pkr = new Intl.NumberFormat('en-PK', {
   style: 'currency',
@@ -628,13 +628,21 @@ function Orders() {
   useEffect(() => {
     if (!printInvoice || printTriggered.current) return undefined;
     printTriggered.current = true;
-    const frame = requestAnimationFrame(() => {
-      window.print();
-      setPrintInvoice(null);
-      setPrintingOrderId(null);
-      printTriggered.current = false;
+    let cancelled = false;
+    preloadPrintFormPages().then(() => {
+      if (cancelled) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.print();
+          setPrintInvoice(null);
+          setPrintingOrderId(null);
+          printTriggered.current = false;
+        });
+      });
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelled = true;
+    };
   }, [printInvoice]);
 
   useEffect(() => {
