@@ -58,6 +58,15 @@ function formatInvoiceDate(iso) {
   return d.local().format('DD MMM YYYY');
 }
 
+const amountFiguresFmt = new Intl.NumberFormat('en-PK', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
+
+function formatAmountFigures(n) {
+  return amountFiguresFmt.format(roundMoney(n));
+}
+
 function formatInvoiceTime(iso) {
   const d = parseDbTimestamp(iso);
   if (!d || !d.isValid()) return '';
@@ -130,6 +139,46 @@ function buildTotals(lines, invoice) {
 }
 
 /**
+ * Dynamic fields overlaid on the scanned V.P.P. postal form (page 2).
+ * @param {{ invoice: import('../../global').InvoiceForPrint; totals: ReturnType<typeof buildTotals> }} props
+ */
+function PostFormPage2Overlay({ invoice, totals }) {
+  const customerName = String(invoice.customer_name || '').trim();
+  const customerCity = String(invoice.customer_city || '').trim();
+  const trackingId = String(invoice.tracking_id || '').trim();
+  const orderNo = String(invoice.order_number || '').trim();
+  const qrPayload = buildInvoiceQrPayload(orderNo, trackingId);
+  const orderDate = formatInvoiceDate(invoice.created_at);
+  const amountFigures = formatAmountFigures(totals.grandTotal);
+  const recipient = [customerName, customerCity].filter(Boolean).join(', ');
+
+  return (
+    <div className="post-form-p2-overlay" aria-hidden="true">
+      {qrPayload ? (
+        <div className="post-form-p2-qr">
+          <QRCodeSVG
+            value={qrPayload}
+            size={96}
+            level="M"
+            marginSize={0}
+            bgColor="#ffffff"
+            fgColor="#111111"
+          />
+        </div>
+      ) : null}
+      <p className="post-form-p2-field post-form-p2-amount-figures">{amountFigures}</p>
+      <p className="post-form-p2-field post-form-p2-customer-name">{recipient}</p>
+      <p className="post-form-p2-field post-form-p2-intimation-amount">{amountFigures}</p>
+      {trackingId ? (
+        <p className="post-form-p2-field post-form-p2-tracking">{trackingId}</p>
+      ) : null}
+      <p className="post-form-p2-field post-form-p2-order-date">{orderDate}</p>
+        <p className="post-form-p2-field post-form-p2-recipient-bottom">{recipient}</p>
+    </div>
+  );
+}
+
+/**
  * @param {{ invoice: import('../../global').InvoiceForPrint }} props
  */
 function CustomerBlock({ invoice }) {
@@ -181,7 +230,10 @@ export function InvoicePrintView({ invoice }) {
         <img src={postFormPage1} alt="" className="invoice-print-form-img" />
       </div>
       <div className="invoice-print-page invoice-print-form-page">
-        <img src={postFormPage2} alt="" className="invoice-print-form-img" />
+        <div className="invoice-print-form-canvas">
+          <img src={postFormPage2} alt="" className="invoice-print-form-img" />
+          <PostFormPage2Overlay invoice={invoice} totals={totals} />
+        </div>
       </div>
       <div className="invoice-print-page invoice-print-invoice-page">
       <article className="invoice-sheet">
