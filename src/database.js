@@ -146,6 +146,12 @@ function initDatabase(app) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS installation_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      installation_id TEXT NOT NULL UNIQUE,
+      registered_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS login_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -544,6 +550,26 @@ function buildOrderListWhere(filters) {
   return { whereSql, params };
 }
 
+/** ORDER BY for orders list — `none` keeps the default newest-first ordering. */
+function buildOrderListOrderBy(filters) {
+  const sortBy = String(filters?.sortBy ?? 'none').trim().toLowerCase();
+  const sortDir =
+    String(filters?.sortDir ?? 'desc').trim().toLowerCase() === 'asc'
+      ? 'ASC'
+      : 'DESC';
+  const tie = sortDir === 'ASC' ? 'ASC' : 'DESC';
+
+  if (sortBy === 'created_at') {
+    return `ORDER BY datetime(o.created_at) ${sortDir}, o.id ${tie}`;
+  }
+  if (sortBy === 'weight') {
+    return `ORDER BY (
+      SELECT COALESCE(SUM(i.weight_g), 0) FROM order_items i WHERE i.order_id = o.id
+    ) ${sortDir}, o.id ${tie}`;
+  }
+  return `ORDER BY datetime(o.created_at) DESC, o.id DESC`;
+}
+
 const invoiceQueries = {
   /** INV + DDMMYY + 4-digit daily serial (e.g. INV1105260001). */
   generateInvoiceNumber(db) {
@@ -702,6 +728,7 @@ const orderQueries = {
 
   listOrdersPaged(db, page, pageSize, filters = {}) {
     const { whereSql, params: whereParams } = buildOrderListWhere(filters);
+    const orderBySql = buildOrderListOrderBy(filters);
     const total = db
       .prepare(`SELECT COUNT(*) AS c FROM orders o ${whereSql}`)
       .get(...whereParams).c;
@@ -723,7 +750,7 @@ const orderQueries = {
          FROM orders o
          LEFT JOIN users u ON u.id = o.placed_by_user_id
          ${whereSql}
-         ORDER BY datetime(o.created_at) DESC, o.id DESC
+         ${orderBySql}
          LIMIT ? OFFSET ?`,
       )
       .all(...whereParams, pageSize, offset);
@@ -1033,6 +1060,25 @@ const resetQueries = {
   },
 };
 
+const installationQueries = {
+  getMeta(db) {
+    return db
+      .prepare(
+        `SELECT installation_id, registered_at FROM installation_meta WHERE id = 1`,
+      )
+      .get();
+  },
+
+  setMeta(db, installationId) {
+    db.prepare(
+      `INSERT INTO installation_meta (id, installation_id) VALUES (1, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         installation_id = excluded.installation_id,
+         registered_at = datetime('now')`,
+    ).run(installationId);
+  },
+};
+
 module.exports = {
   initDatabase,
   needsSetup,
@@ -1043,4 +1089,5 @@ module.exports = {
   invoiceQueries,
   resetQueries,
   dashboardQueries,
+  installationQueries,
 };

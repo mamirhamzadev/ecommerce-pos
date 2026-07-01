@@ -17,6 +17,7 @@ function wrapApi(raw) {
     typeof raw.restoreBackup !== 'function';
   const needsSetupPatch =
     typeof raw.getSetupStatus !== 'function' || typeof raw.completeSetup !== 'function';
+  const needsSubscriptionPatch = typeof raw.checkSubscriptionStatus !== 'function';
   if (
     !needsInvoicesPatch &&
     !needsInvoicePrintPatch &&
@@ -26,7 +27,8 @@ function wrapApi(raw) {
     !needsUserPatch &&
     !needsUpdaterPatch &&
     !needsBackupPatch &&
-    !needsSetupPatch
+    !needsSetupPatch &&
+    !needsSubscriptionPatch
   ) {
     return raw;
   }
@@ -52,6 +54,11 @@ function wrapApi(raw) {
         ? {
             getSetupStatus: () => raw.invoke('auth:setupStatus'),
             completeSetup: (payload) => raw.invoke('auth:completeSetup', payload),
+          }
+        : {}),
+      ...(needsSubscriptionPatch
+        ? {
+            checkSubscriptionStatus: () => raw.invoke('subscription:checkStatus'),
           }
         : {}),
       ...(needsUserPatch
@@ -133,6 +140,16 @@ function wrapApi(raw) {
             Promise.reject(
               new Error(
                 'First-time setup requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
+        }
+      : {}),
+    ...(needsSubscriptionPatch
+      ? {
+          checkSubscriptionStatus: () =>
+            Promise.reject(
+              new Error(
+                'Subscription check requires a newer app build. Restart the app after updating preload.',
               ),
             ),
         }

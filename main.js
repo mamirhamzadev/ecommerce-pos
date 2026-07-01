@@ -34,9 +34,16 @@ const {
   invoiceQueries,
   resetQueries,
   dashboardQueries,
+  installationQueries,
 } = require("./src/database");
 const { hashPassword, verifyPassword } = require("./src/auth");
 const { sendEmail } = require("./src/helpers");
+const {
+  registerInstallation,
+  syncCustomerOnLogin,
+  fetchSubscriptionStatus,
+  INTERNET_REQUIRED_ERROR,
+} = require("./src/subscription");
 const { registerAppUpdater } = require("./src/electronUpdater");
 const {
   buildBackupFileName,
@@ -95,6 +102,69 @@ function requireAdminSession() {
   }
   if (currentSession.role !== "admin") {
     return { ok: false, error: "Only administrators can manage backups." };
+  }
+  return null;
+}
+
+function getOrCreateInstallationId() {
+  const meta = installationQueries.getMeta(db);
+  if (meta?.installation_id) {
+    return meta.installation_id;
+  }
+  const installationId = crypto.randomUUID();
+  installationQueries.setMeta(db, installationId);
+  return installationId;
+}
+
+async function getRemoteSubscriptionBlockStatus() {
+  const meta = installationQueries.getMeta(db);
+  if (!meta?.installation_id) {
+    return {
+      ok: false,
+      offline: true,
+      error: INTERNET_REQUIRED_ERROR,
+    };
+  }
+
+  const remote = await fetchSubscriptionStatus(meta.installation_id);
+  if (!remote.ok) {
+    return {
+      ok: false,
+      offline: remote.offline === true,
+      error: remote.error || INTERNET_REQUIRED_ERROR,
+    };
+  }
+
+  return {
+    ok: true,
+    blocked: remote.blocked === true,
+    registered: true,
+    blockReason: remote.blockReason,
+    contactEmail: remote.contactEmail,
+    contactPhone: remote.contactPhone,
+  };
+}
+
+async function assertInstallationNotBlocked() {
+  const status = await getRemoteSubscriptionBlockStatus();
+  if (!status.ok) {
+    return {
+      ok: false,
+      code: status.offline ? "OFFLINE" : "SUBSCRIPTION_ERROR",
+      error: status.error || INTERNET_REQUIRED_ERROR,
+    };
+  }
+  if (status.blocked === true) {
+    return {
+      ok: false,
+      code: "SUBSCRIPTION_BLOCKED",
+      error:
+        status.blockReason ||
+        "Your subscription has expired. Please contact the administrator.",
+      blockReason: status.blockReason,
+      contactEmail: status.contactEmail,
+      contactPhone: status.contactPhone,
+    };
   }
   return null;
 }
@@ -220,10 +290,48 @@ ipcMain.handle("auth:setupStatus", async () => {
 ipcMain.handle(
   "auth:completeSetup",
   async (_event, { username, password, name, email }) => {
+    if (!needsSetup(db)) {
+      return {
+        ok: false,
+        error: "Setup has already been completed on this device.",
+      };
+    }
+
+    const u = String(username || "").trim();
+    if (!u) {
+      return { ok: false, error: "Username is required." };
+    }
+    const pwd = String(password || "");
+    if (pwd.length < 6) {
+      return { ok: false, error: "Password must be at least 6 characters." };
+    }
+
+    const installationId = crypto.randomUUID();
+    const registerRes = await registerInstallation({
+      installationId,
+      username: u,
+      password: pwd,
+      name: normalizePersonName(name) || "Administrator",
+      email: normalizeEmail(email),
+      role: "admin",
+      appName: process.env.APP_NAME?.trim() || "POS",
+    });
+
+    if (!registerRes.ok) {
+      return {
+        ok: false,
+        error: registerRes.error || "Could not register this installation.",
+        offline: registerRes.offline === true,
+      };
+    }
+
     const result = createFirstAdmin(db, { username, password, name, email });
     if (!result.ok) {
       return result;
     }
+
+    installationQueries.setMeta(db, installationId);
+
     const row = userQueries.findById(db, result.userId);
     if (!row) {
       return { ok: false, error: "Could not create administrator account." };
@@ -260,6 +368,39 @@ ipcMain.handle("auth:login", async (_event, { username, password }) => {
   if (!row || !verifyPassword(password, row.password_hash)) {
     return { ok: false, error: "Invalid username or password." };
   }
+
+  const installationId = getOrCreateInstallationId();
+  const syncRes = await syncCustomerOnLogin({
+    installationId,
+    username: row.username,
+    password: String(password),
+    name: row.name ?? "",
+    email: row.email ?? "",
+    role: row.role,
+    appName: process.env.APP_NAME?.trim() || "POS",
+  });
+
+  if (!syncRes.ok) {
+    return {
+      ok: false,
+      error: syncRes.error || INTERNET_REQUIRED_ERROR,
+      offline: syncRes.offline === true,
+    };
+  }
+
+  if (syncRes.blocked === true) {
+    return {
+      ok: false,
+      code: "SUBSCRIPTION_BLOCKED",
+      error:
+        syncRes.blockReason ||
+        "Your subscription has expired. Please contact the administrator.",
+      blockReason: syncRes.blockReason,
+      contactEmail: syncRes.contactEmail,
+      contactPhone: syncRes.contactPhone,
+    };
+  }
+
   const token = getSessionToken();
   userQueries.saveSession(db, row.id, token);
   dashboardQueries.recordLogin(db, row.id);
@@ -289,6 +430,11 @@ ipcMain.handle("auth:logout", async (_event, token) => {
 });
 
 ipcMain.handle("auth:forgotRequest", async (_event, { username }) => {
+  const blocked = await assertInstallationNotBlocked();
+  if (blocked) {
+    return blocked;
+  }
+
   const u = String(username || "").trim();
   if (!u) {
     return { ok: false, error: "Username is required." };
@@ -329,6 +475,11 @@ ipcMain.handle("auth:forgotRequest", async (_event, { username }) => {
 ipcMain.handle(
   "auth:forgotComplete",
   async (_event, { username, code, newPassword }) => {
+    const blocked = await assertInstallationNotBlocked();
+    if (blocked) {
+      return blocked;
+    }
+
     const u = String(username || "").trim();
     const rawCode = String(code || "").trim();
     const pwd = String(newPassword || "");
@@ -384,9 +535,18 @@ ipcMain.handle("auth:session", async (_event, token) => {
   return { ok: true, user: buildClientUserPayload(currentSession) };
 });
 
+ipcMain.handle("subscription:checkStatus", async () => {
+  return getRemoteSubscriptionBlockStatus();
+});
+
 ipcMain.handle(
   "auth:changePassword",
   async (_event, { token, currentPassword, newPassword }) => {
+    const blocked = await assertInstallationNotBlocked();
+    if (blocked) {
+      return blocked;
+    }
+
     if (!token || typeof token !== "string") {
       return { ok: false, error: "Not signed in." };
     }
@@ -538,8 +698,17 @@ ipcMain.handle("orders:listPaged", async (_event, payload) => {
       ? payload.status.trim().toLowerCase()
       : "all";
   const q = typeof payload?.q === "string" ? payload.q.trim() : "";
+  const sortBy =
+    typeof payload?.sortBy === "string" && payload.sortBy.trim()
+      ? payload.sortBy.trim().toLowerCase()
+      : "none";
+  const sortDir =
+    typeof payload?.sortDir === "string" &&
+    payload.sortDir.trim().toLowerCase() === "asc"
+      ? "asc"
+      : "desc";
   const { rows, total, page: safePage, pageSize: psOut } =
-    orderQueries.listOrdersPaged(db, p, ps, { status, q });
+    orderQueries.listOrdersPaged(db, p, ps, { status, q, sortBy, sortDir });
   return {
     ok: true,
     orders: rows,

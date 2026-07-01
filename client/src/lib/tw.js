@@ -132,6 +132,14 @@ export const twOrdersFilterSelect =
 export const twOrdersFilterSearch =
   'min-w-0 w-full rounded-[length:var(--radius-sm)] border border-[color:var(--border)] bg-[var(--surface)] px-2.5 py-2 text-inherit text-[var(--text)] outline-none focus:border-sky-400/35 focus:shadow-[var(--ring)]';
 
+export const twOrdersSortControls = 'flex items-center gap-1.5';
+
+export const twOrdersSortBtnActive =
+  '!bg-sky-500/18 !text-sky-300 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.35)]';
+
+export const twOrdersSortDirBtn =
+  'inline-flex h-[38px] min-w-[2.35rem] shrink-0 items-center justify-center rounded-[length:var(--radius-sm)] border border-[color:var(--border)] bg-[var(--surface)] text-[var(--text)] transition-colors hover:border-sky-400/35 hover:bg-white/[0.04]';
+
 export const twUsersTableHead = 'mb-1 flex flex-wrap items-center justify-between gap-3';
 
 export const twUsersPageSize = 'flex items-center gap-2';

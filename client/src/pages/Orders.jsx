@@ -7,6 +7,12 @@ import {
   setStoredPageSize,
 } from '../lib/pageSize';
 import {
+  getStoredOrderSort,
+  ORDER_SORT_DIRECTIONS,
+  ORDER_SORT_FIELDS,
+  setStoredOrderSort,
+} from '../lib/orderSort';
+import {
   twAlertError,
   twBtnGhostSm,
   twBtnPrimarySm,
@@ -72,6 +78,9 @@ import {
   twOrdersFilterGrow,
   twOrdersFilterSearch,
   twOrdersFilterSelect,
+  twOrdersSortControls,
+  twOrdersSortBtnActive,
+  twOrdersSortDirBtn,
   twOrdersLinesCellCompact,
   twOrdersLinesCount,
   twOrdersLinesSummaryInline,
@@ -132,6 +141,12 @@ const STATUS_OPTIONS = [
 const STATUS_FILTER_OPTIONS = [
   { value: 'all', label: 'All statuses' },
   ...STATUS_OPTIONS,
+];
+
+const ORDER_SORT_FIELD_CONTROLS = [
+  { value: ORDER_SORT_FIELDS.none, icon: 'list', title: 'No sorting' },
+  { value: ORDER_SORT_FIELDS.createdAt, icon: 'calendar', title: 'Sort by created at' },
+  { value: ORDER_SORT_FIELDS.weight, icon: 'weight-hanging', title: 'Sort by total weight' },
 ];
 
 function rowStatusValue(s) {
@@ -537,6 +552,8 @@ function Orders() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterSearchInput, setFilterSearchInput] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
+  const [sortField, setSortField] = useState(() => getStoredOrderSort().field);
+  const [sortDirection, setSortDirection] = useState(() => getStoredOrderSort().direction);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -575,6 +592,8 @@ function Orders() {
       pageSize: ps,
       status: filterStatus,
       q: filterSearch,
+      sortBy: sortField,
+      sortDir: sortDirection,
     });
     setLoading(false);
     if (res.ok === true) {
@@ -588,7 +607,7 @@ function Orders() {
     setListError(res.error || 'Could not load orders.');
     notifyError(res.error || 'Could not load orders.');
     return false;
-  }, [filterStatus, filterSearch]);
+  }, [filterStatus, filterSearch, sortField, sortDirection]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -914,7 +933,33 @@ function Orders() {
     setListError('');
   }
 
+  function updateSortField(nextField) {
+    setSortField(nextField);
+    setStoredOrderSort({ field: nextField, direction: sortDirection });
+    setPage(1);
+  }
+
+  function updateSortDirection(nextDirection) {
+    setSortDirection(nextDirection);
+    setStoredOrderSort({ field: sortField, direction: nextDirection });
+    setPage(1);
+  }
+
+  function toggleSortDirection() {
+    const next =
+      sortDirection === ORDER_SORT_DIRECTIONS.asc
+        ? ORDER_SORT_DIRECTIONS.desc
+        : ORDER_SORT_DIRECTIONS.asc;
+    updateSortDirection(next);
+  }
+
+  const sortDirectionTitle =
+    sortDirection === ORDER_SORT_DIRECTIONS.asc
+      ? 'Ascending — click to sort descending'
+      : 'Descending — click to sort ascending';
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const sortActive = sortField !== ORDER_SORT_FIELDS.none;
   const hasActiveFilters =
     filterStatus !== 'all' || filterSearchInput.trim() !== '';
 
@@ -979,6 +1024,11 @@ function Orders() {
         <p className={twSectionDescTight}>
           {total} order{total === 1 ? '' : 's'}
           {hasActiveFilters ? ' match your filters.' : ' total.'}
+          {sortActive
+            ? sortField === ORDER_SORT_FIELDS.weight
+              ? ' Sorted by total line weight.'
+              : ' Sorted by created date.'
+            : ''}
         </p>
 
         <div className={twOrdersFilterBar}>
@@ -1017,6 +1067,52 @@ function Orders() {
               value={filterSearchInput}
               onChange={(e) => setFilterSearchInput(e.target.value)}
             />
+          </div>
+          <div className={twOrdersFilterField}>
+            <span className={twFieldLabel} id="orders-filter-sort-label">
+              Sort
+            </span>
+            <div className={twOrdersSortControls}>
+              <div
+                className={twTableActionGroup}
+                role="group"
+                aria-label="Sort by"
+                aria-labelledby="orders-filter-sort-label"
+              >
+                {ORDER_SORT_FIELD_CONTROLS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`${twTableIconBtnGhost} ${
+                      sortField === opt.value ? twOrdersSortBtnActive : ''
+                    }`}
+                    title={opt.title}
+                    aria-label={opt.title}
+                    aria-pressed={sortField === opt.value}
+                    onClick={() => updateSortField(opt.value)}
+                  >
+                    <FaIcon icon={opt.icon} />
+                  </button>
+                ))}
+              </div>
+              {sortActive ? (
+                <button
+                  type="button"
+                  className={twOrdersSortDirBtn}
+                  title={sortDirectionTitle}
+                  aria-label={sortDirectionTitle}
+                  onClick={toggleSortDirection}
+                >
+                  <FaIcon
+                    icon={
+                      sortDirection === ORDER_SORT_DIRECTIONS.asc
+                        ? 'arrow-up-wide-short'
+                        : 'arrow-down-wide-short'
+                    }
+                  />
+                </button>
+              ) : null}
+            </div>
           </div>
           {hasActiveFilters ? (
             <button type="button" className={twBtnGhostSm} onClick={clearOrderFilters}>

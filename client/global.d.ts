@@ -96,6 +96,7 @@ declare global {
           | 'auth:changePassword'
           | 'auth:logout'
           | 'auth:session'
+          | 'subscription:checkStatus'
           | 'users:update'
           | 'dashboard:snapshot'
           | 'products:listPaged'
@@ -121,7 +122,15 @@ declare global {
       ) => Promise<unknown>;
       login: (payload: { username: string; password: string }) => Promise<
         | { ok: true; token: string; user: UserPublic }
-        | { ok: false; error?: string }
+        | {
+            ok: false;
+            error?: string;
+            code?: string;
+            offline?: boolean;
+            blockReason?: string;
+            contactEmail?: string;
+            contactPhone?: string;
+          }
       >;
       getSetupStatus: () => Promise<
         | { ok: true; needsSetup: boolean }
@@ -134,7 +143,7 @@ declare global {
         email?: string;
       }) => Promise<
         | { ok: true; token: string; user: UserPublic }
-        | { ok: false; error?: string }
+        | { ok: false; error?: string; offline?: boolean }
       >;
       forgotRequest: (payload: { username: string }) => Promise<
         | { ok: true; issued: true; code: string }
@@ -155,6 +164,17 @@ declare global {
       getSession: (token: string | null) => Promise<
         | { ok: true; user: UserPublic }
         | { ok: false }
+      >;
+      checkSubscriptionStatus: () => Promise<
+        | {
+            ok: true;
+            blocked: boolean;
+            registered?: boolean;
+            blockReason?: string;
+            contactEmail?: string;
+            contactPhone?: string;
+          }
+        | { ok: false; error?: string; offline?: boolean }
       >;
       updateUser: (payload: {
         id: number;
@@ -218,6 +238,10 @@ declare global {
         status?: string;
         /** Substring match on customer name or order #; exact match on internal id */
         q?: string;
+        /** `none` | `created_at` | `weight` */
+        sortBy?: string;
+        /** `asc` | `desc` */
+        sortDir?: string;
       }) => Promise<
         | {
             ok: true;

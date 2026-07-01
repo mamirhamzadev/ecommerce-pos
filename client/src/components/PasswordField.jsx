@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { FaIcon } from './FaIcon';
 
-/** @param {{ label: string; value: string; onChange: (v: string) => void; autoComplete?: string; placeholder?: string; minLength?: number; required?: boolean }} props */
+/** @param {{ label: string; value: string; onChange: (v: string) => void; autoComplete?: string; placeholder?: string; minLength?: number; required?: boolean; disabled?: boolean }} props */
 export function PasswordField({
   label,
   value,
@@ -10,6 +10,7 @@ export function PasswordField({
   placeholder,
   minLength,
   required,
+  disabled = false,
 }) {
   const baseId = useId();
   const inputId = `${baseId}-input`;
@@ -30,6 +31,7 @@ export function PasswordField({
           placeholder={placeholder}
           minLength={minLength}
           required={required}
+          disabled={disabled}
         />
         <button
           type="button"
@@ -38,6 +40,7 @@ export function PasswordField({
           aria-pressed={visible}
           aria-label={visible ? 'Hide password' : 'Show password'}
           title={visible ? 'Hide' : 'Show'}
+          disabled={disabled}
         >
           {visible ? (
             <FaIcon icon="eye-slash" className="fa-password-toggle" />

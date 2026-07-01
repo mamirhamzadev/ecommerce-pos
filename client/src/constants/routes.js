@@ -7,12 +7,16 @@ import Orders from "../pages/Orders";
 import Products from "../pages/Products";
 import Profile from "../pages/Profile";
 import ResetPassword from "../pages/ResetPassword";
+import SubscriptionBlocked from "../pages/SubscriptionBlocked";
+import InternetRequired from "../pages/InternetRequired";
 import Settings from "../pages/Settings";
 
 export const SETUP_ROUTE = "/setup";
 export const LOGIN_ROUTE = "/login";
 export const FORGOT_PASSWORD_ROUTE = "/forgot-password";
 export const RESET_PASSWORD_ROUTE = "/reset-password";
+export const SUBSCRIPTION_BLOCKED_ROUTE = "/subscription-blocked";
+export const INTERNET_REQUIRED_ROUTE = "/internet-required";
 export const DASHBOARD_ROUTE = "/";
 export const PROFILE_ROUTE = "/profile";
 export const PROFILE_EDIT_ROUTE = "/profile/edit";
@@ -42,6 +46,20 @@ export const publicRoutes = [
     path: RESET_PASSWORD_ROUTE,
     component: ResetPassword,
     title: "Reset Password",
+  },
+];
+
+/** Shown after login when remote subscription check reports blocked. */
+export const gatedRoutes = [
+  {
+    path: SUBSCRIPTION_BLOCKED_ROUTE,
+    component: SubscriptionBlocked,
+    title: "Subscription required",
+  },
+  {
+    path: INTERNET_REQUIRED_ROUTE,
+    component: InternetRequired,
+    title: "Internet required",
   },
 ];
 

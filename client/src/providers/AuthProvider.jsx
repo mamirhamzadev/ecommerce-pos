@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, useLocation } from "react-router-dom";
 import { getApi } from "../api";
-import { LOGIN_ROUTE, publicRoutes, SETUP_ROUTE } from "../constants/routes";
+import {
+  LOGIN_ROUTE,
+  publicRoutes,
+  SETUP_ROUTE,
+  SUBSCRIPTION_BLOCKED_ROUTE,
+} from "../constants/routes";
+import { useSubscriptionHeartbeat } from "../hooks/useSubscriptionHeartbeat";
 import Spinner from "../components/Spinner";
 import { clearUser, setUser } from "../redux/actions/user";
 import { AUTH_TOKEN_KEY } from "../session";
@@ -43,22 +49,25 @@ function AuthProvider({ children }) {
   const user = useSelector((state) => /** @type {any} */ (state)?.auth?.user);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
-  const validationEpochRef = useRef(0);
+  const bootstrapEpochRef = useRef(0);
+
+  const { subscriptionBlocked, checkingInitial } = useSubscriptionHeartbeat(Boolean(user));
 
   const pathname = location.pathname;
   const onPublicRoute = isPublicPath(pathname);
   const onSetupRoute = pathname === SETUP_ROUTE;
-  const showInitialSpinner = bootstrapping && !onPublicRoute;
+  const onSubscriptionBlockedRoute = pathname === SUBSCRIPTION_BLOCKED_ROUTE;
+  const showInitialSpinner = bootstrapping && !onPublicRoute && !onSubscriptionBlockedRoute;
 
   useEffect(() => {
-    const epoch = ++validationEpochRef.current;
+    const epoch = ++bootstrapEpochRef.current;
     let cancelled = false;
 
     (async () => {
       try {
         const api = getApi();
         const setupRes = await withTimeout(api.getSetupStatus(), SESSION_VALIDATE_TIMEOUT_MS);
-        if (cancelled || epoch !== validationEpochRef.current) return;
+        if (cancelled || epoch !== bootstrapEpochRef.current) return;
 
         const setupRequired = setupRes?.needsSetup === true;
         setNeedsSetup(setupRequired);
@@ -76,7 +85,7 @@ function AuthProvider({ children }) {
         }
 
         const res = await withTimeout(api.getSession(token), SESSION_VALIDATE_TIMEOUT_MS);
-        if (cancelled || epoch !== validationEpochRef.current) return;
+        if (cancelled || epoch !== bootstrapEpochRef.current) return;
         if (res?.ok === true && res.user) {
           dispatch(setUser(res.user, token));
         } else {
@@ -84,11 +93,11 @@ function AuthProvider({ children }) {
           dispatch(clearUser());
         }
       } catch {
-        if (cancelled || epoch !== validationEpochRef.current) return;
+        if (cancelled || epoch !== bootstrapEpochRef.current) return;
         localStorage.removeItem(AUTH_TOKEN_KEY);
         dispatch(clearUser());
       } finally {
-        if (!cancelled && epoch === validationEpochRef.current) {
+        if (!cancelled && epoch === bootstrapEpochRef.current) {
           setBootstrapping(false);
         }
       }
@@ -97,7 +106,7 @@ function AuthProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [dispatch, pathname]);
+  }, [dispatch]);
 
   if (!bootstrapping && needsSetup && !onSetupRoute) {
     return <Navigate to={SETUP_ROUTE} replace state={{ from: location }} />;
@@ -111,8 +120,25 @@ function AuthProvider({ children }) {
     return <Spinner label="Restoring session…" />;
   }
 
-  if (!user && !onPublicRoute) {
+  if (!user && !onPublicRoute && !onSubscriptionBlockedRoute) {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (
+    user &&
+    checkingInitial &&
+    !onSubscriptionBlockedRoute &&
+    !onPublicRoute
+  ) {
+    return <Spinner label="Checking subscription…" />;
+  }
+
+  if (user && subscriptionBlocked === true && !onSubscriptionBlockedRoute) {
+    return <Navigate to={SUBSCRIPTION_BLOCKED_ROUTE} replace />;
+  }
+
+  if (user && subscriptionBlocked === false && onSubscriptionBlockedRoute) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

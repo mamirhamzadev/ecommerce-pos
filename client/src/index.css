@@ -1110,6 +1110,52 @@ html {
   gap: 4px;
 }
 
+.auth-submit-btn {
+  min-height: 44px;
+}
+
+.auth-submit-btn-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.auth-submit-spinner {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  animation: auth-submit-spin 0.7s linear infinite;
+}
+
+@keyframes auth-submit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-submit-spinner {
+    animation: none;
+    border-top-color: rgba(255, 255, 255, 0.25);
+  }
+}
+
+.login-form.is-submitting input,
+.login-form.is-submitting select,
+.login-form.is-submitting .input-adorned-btn {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.login-form.is-submitting .link-text {
+  pointer-events: none;
+  opacity: 0.72;
+}
+
 .field {
   display: flex;
   flex-direction: column;

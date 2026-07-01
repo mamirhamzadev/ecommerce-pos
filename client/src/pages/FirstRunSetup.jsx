@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { getApi } from '../api';
+import { AuthSubmitButton } from '../components/AuthSubmitButton';
 import { PasswordField } from '../components/PasswordField';
 import { notifyError } from '../lib/notify';
 import { setUser } from '../redux/actions/user';
@@ -48,10 +49,13 @@ function FirstRunSetup() {
   return (
     <AuthWrapper title="First-time setup">
       <p className="login-sub">
-        Welcome. Create the administrator account for this installation. You can add
-        more users later from the dashboard.
+        Welcome. Create the administrator account for this installation. An internet
+        connection is required. You can add more users later from the dashboard.
       </p>
-      <form className="login-form" onSubmit={handleSubmit}>
+      <form
+        className={`login-form${submitting ? ' is-submitting' : ''}`}
+        onSubmit={handleSubmit}
+      >
         <div className="field">
           <span className="field-label">Username</span>
           <input
@@ -61,6 +65,7 @@ function FirstRunSetup() {
             autoComplete="username"
             placeholder="e.g. admin"
             required
+            disabled={submitting}
           />
         </div>
         <div className="field">
@@ -71,6 +76,7 @@ function FirstRunSetup() {
             onChange={(e) => setName(e.target.value)}
             autoComplete="name"
             placeholder="Administrator"
+            disabled={submitting}
           />
         </div>
         <div className="field">
@@ -81,6 +87,7 @@ function FirstRunSetup() {
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
             placeholder="you@example.com"
+            disabled={submitting}
           />
         </div>
         <PasswordField
@@ -90,6 +97,7 @@ function FirstRunSetup() {
           autoComplete="new-password"
           placeholder="At least 6 characters"
           required
+          disabled={submitting}
         />
         <PasswordField
           label="Confirm password"
@@ -98,10 +106,11 @@ function FirstRunSetup() {
           autoComplete="new-password"
           placeholder="Repeat password"
           required
+          disabled={submitting}
         />
-        <button type="submit" className="btn btn-primary" disabled={submitting}>
-          {submitting ? 'Creating account…' : 'Create administrator'}
-        </button>
+        <AuthSubmitButton loading={submitting} loadingLabel="Creating account…">
+          Create administrator
+        </AuthSubmitButton>
       </form>
     </AuthWrapper>
   );
