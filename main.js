@@ -3,6 +3,12 @@ const fs = require("fs");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 const { app, BrowserWindow, ipcMain, protocol, dialog } = require("electron");
 
+/** Prevent a second process from opening the same SQLite DB (would hang IPC / session restore). */
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
 /** Lets the renderer use BrowserRouter in production (history API) instead of file:// path quirks. */
 protocol.registerSchemesAsPrivileged([
   {
@@ -156,7 +162,8 @@ function createWindow() {
     mainWindow.loadURL(devServerUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    mainWindow.loadURL("app://./index.html");
+    // Use app://./ so BrowserRouter pathname is "/" (not "/index.html", which matches no route).
+    mainWindow.loadURL("app://./");
   }
 }
 
@@ -168,7 +175,18 @@ function generatePasswordResetCode() {
   return crypto.randomBytes(4).toString("hex");
 }
 
+if (gotSingleInstanceLock) {
+  app.on("second-instance", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return;
+
   if (!process.env.VITE_DEV_SERVER_URL) {
     registerRendererAppProtocol();
   }
