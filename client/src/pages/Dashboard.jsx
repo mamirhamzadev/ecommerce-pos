@@ -33,6 +33,10 @@ const MODULE_COPY = {
     title: 'Invoices',
     subtitle: 'Billing documents and exports.',
   },
+  settings: {
+    title: 'Settings',
+    subtitle: 'Backup, restore, and data management.',
+  },
   profile: {
     title: 'Profile',
     subtitle: 'Your account details and preferences.',
@@ -52,6 +56,9 @@ function metaFromPathname({ pathname }) {
   }
   if (pathname.startsWith('/profile')) {
     return MODULE_COPY.profile;
+  }
+  if (pathname.startsWith('/settings')) {
+    return MODULE_COPY.settings;
   }
   const seg = pathname.split('/').filter(Boolean)[0];
   if (seg && MODULE_COPY[seg]) {
@@ -109,6 +116,8 @@ export function Dashboard() {
 
   const profileNavActive =
     location.pathname === '/profile' || location.pathname.startsWith('/profile/');
+  const settingsNavActive =
+    location.pathname === '/settings' || location.pathname.startsWith('/settings/');
 
   const navItems = [
     { to: '/', end: true, label: 'Dashboard', icon: 'gauge-high' },
@@ -141,6 +150,12 @@ export function Dashboard() {
                 {label}
               </NavLink>
             ))}
+            <NavLink to="/settings" className={sidebarLinkClass(settingsNavActive)}>
+              <span className="sidebar-link-icon">
+                <FaIcon icon="gear" className="sidebar-fa" />
+              </span>
+              Settings
+            </NavLink>
             <NavLink to="/profile" className={sidebarLinkClass(profileNavActive)}>
               <span className="sidebar-link-icon">
                 <FaIcon icon="user" className="sidebar-fa" />

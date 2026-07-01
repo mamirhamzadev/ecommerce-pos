@@ -11,6 +11,10 @@ function wrapApi(raw) {
     typeof raw.checkAppUpdates !== 'function' ||
     typeof raw.quitAndInstallUpdate !== 'function' ||
     typeof raw.onUpdaterEvent !== 'function';
+  const needsBackupPatch =
+    typeof raw.createBackup !== 'function' ||
+    typeof raw.validateBackupFile !== 'function' ||
+    typeof raw.restoreBackup !== 'function';
   if (
     !needsInvoicesPatch &&
     !needsInvoicePrintPatch &&
@@ -18,7 +22,8 @@ function wrapApi(raw) {
     !needsPickerPatch &&
     !needsPasswordPatch &&
     !needsUserPatch &&
-    !needsUpdaterPatch
+    !needsUpdaterPatch &&
+    !needsBackupPatch
   ) {
     return raw;
   }
@@ -64,6 +69,13 @@ function wrapApi(raw) {
               typeof raw.onUpdaterEvent === 'function'
                 ? (cb) => raw.onUpdaterEvent(cb)
                 : () => () => {},
+          }
+        : {}),
+      ...(needsBackupPatch
+        ? {
+            createBackup: (payload) => raw.invoke('backup:create', payload),
+            validateBackupFile: () => raw.invoke('backup:validate'),
+            restoreBackup: (payload) => raw.invoke('backup:restore', payload),
           }
         : {}),
     };
@@ -151,6 +163,28 @@ function wrapApi(raw) {
               ),
             ),
           onUpdaterEvent: () => () => {},
+        }
+      : {}),
+    ...(needsBackupPatch
+      ? {
+          createBackup: () =>
+            Promise.reject(
+              new Error(
+                'Backup requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
+          validateBackupFile: () =>
+            Promise.reject(
+              new Error(
+                'Backup requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
+          restoreBackup: () =>
+            Promise.reject(
+              new Error(
+                'Backup requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
         }
       : {}),
   };

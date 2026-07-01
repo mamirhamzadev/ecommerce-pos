@@ -111,7 +111,10 @@ declare global {
           | 'invoices:deleteAll'
           | 'app:updaterInfo'
           | 'app:updaterCheck'
-          | 'app:updaterQuitAndInstall',
+          | 'app:updaterQuitAndInstall'
+          | 'backup:create'
+          | 'backup:validate'
+          | 'backup:restore',
         payload?: unknown,
       ) => Promise<unknown>;
       login: (payload: { username: string; password: string }) => Promise<
@@ -329,6 +332,55 @@ declare global {
         | { ok: false; error?: string; currentVersion?: string }
       >;
       quitAndInstallUpdate: () => Promise<{ ok: true } | { ok: false; error?: string }>;
+      createBackup: (payload: {
+        selection: {
+          logins?: boolean;
+          products?: boolean;
+          orders?: boolean;
+          invoices?: boolean;
+        };
+        deleteAfterBackup?: boolean;
+      }) => Promise<
+        | { ok: true; filePath: string; deletedAfterBackup?: boolean }
+        | { ok: false; error?: string; cancelled?: boolean }
+      >;
+      validateBackupFile: () => Promise<
+        | {
+            ok: true;
+            filePath: string;
+            meta: {
+              formatVersion: number;
+              appName: string;
+              createdAt: string;
+              selection: {
+                logins: boolean;
+                products: boolean;
+                orders: boolean;
+                invoices: boolean;
+              };
+            };
+            counts: Record<string, number>;
+          }
+        | { ok: false; error?: string; cancelled?: boolean }
+      >;
+      restoreBackup: (payload: { filePath: string }) => Promise<
+        | {
+            ok: true;
+            restored: Record<string, number>;
+            meta: {
+              formatVersion: number;
+              appName: string;
+              createdAt: string;
+              selection: {
+                logins: boolean;
+                products: boolean;
+                orders: boolean;
+                invoices: boolean;
+              };
+            };
+          }
+        | { ok: false; error?: string }
+      >;
       onUpdaterEvent: (callback: (payload: UpdaterPushPayload) => void) => () => void;
     };
   }

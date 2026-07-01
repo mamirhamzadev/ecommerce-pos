@@ -27,6 +27,9 @@ const ALLOWED_CHANNELS = new Set([
   'app:updaterInfo',
   'app:updaterCheck',
   'app:updaterQuitAndInstall',
+  'backup:create',
+  'backup:validate',
+  'backup:restore',
 ]);
 
 function invoke(channel, payload) {
@@ -62,6 +65,9 @@ contextBridge.exposeInMainWorld('api', {
   getUpdaterInfo: () => invoke('app:updaterInfo'),
   checkAppUpdates: () => invoke('app:updaterCheck'),
   quitAndInstallUpdate: () => invoke('app:updaterQuitAndInstall'),
+  createBackup: (payload) => invoke('backup:create', payload),
+  validateBackupFile: () => invoke('backup:validate'),
+  restoreBackup: (payload) => invoke('backup:restore', payload),
   onUpdaterEvent: (callback) => {
     if (typeof callback !== 'function') {
       return () => {};

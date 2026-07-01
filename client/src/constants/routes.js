@@ -6,6 +6,7 @@ import Orders from "../pages/Orders";
 import Products from "../pages/Products";
 import Profile from "../pages/Profile";
 import ResetPassword from "../pages/ResetPassword";
+import Settings from "../pages/Settings";
 
 export const LOGIN_ROUTE = "/login";
 export const FORGOT_PASSWORD_ROUTE = "/forgot-password";
@@ -16,6 +17,7 @@ export const PROFILE_EDIT_ROUTE = "/profile/edit";
 export const PRODUCTS_ROUTE = "/products";
 export const ORDERS_ROUTE = "/orders";
 export const INVOICES_ROUTE = "/invoices";
+export const SETTINGS_ROUTE = "/settings";
 
 /** Auth pages (no app shell / sidebar). */
 export const publicRoutes = [
@@ -59,6 +61,11 @@ export const shellRoutes = [
     title: "Invoices",
   },
   {
+    path: "settings",
+    component: Settings,
+    title: "Settings",
+  },
+  {
     path: "profile/edit",
     component: Profile,
     title: "Profile",
@@ -77,6 +84,7 @@ export default [
   { path: PRODUCTS_ROUTE, isProtected: true },
   { path: ORDERS_ROUTE, isProtected: true },
   { path: INVOICES_ROUTE, isProtected: true },
+  { path: SETTINGS_ROUTE, isProtected: true },
   { path: PROFILE_EDIT_ROUTE, isProtected: true },
   { path: PROFILE_ROUTE, isProtected: true },
 ];

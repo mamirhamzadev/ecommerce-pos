@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
-const { app, BrowserWindow, ipcMain, protocol } = require("electron");
+const { app, BrowserWindow, ipcMain, protocol, dialog } = require("electron");
 
 /** Lets the renderer use BrowserRouter in production (history API) instead of file:// path quirks. */
 protocol.registerSchemesAsPrivileged([
@@ -28,6 +28,14 @@ const {
 const { hashPassword, verifyPassword } = require("./src/auth");
 const { sendEmail } = require("./src/helpers");
 const { registerAppUpdater } = require("./src/electronUpdater");
+const {
+  buildBackupFileName,
+  normalizeSelection,
+  validateBackupFile,
+  exportBackup,
+  importBackup,
+  deleteBackedUpTransactionalData,
+} = require("./src/backup");
 
 let mainWindow;
 let db;
@@ -69,6 +77,16 @@ function buildClientUserPayload(sessionLike) {
     email: sessionLike.email ?? "",
     role: sessionLike.role,
   };
+}
+
+function requireAdminSession() {
+  if (!currentSession) {
+    return { ok: false, error: "Forbidden." };
+  }
+  if (currentSession.role !== "admin") {
+    return { ok: false, error: "Only administrators can manage backups." };
+  }
+  return null;
 }
 
 const SESSION_TTL_DAYS = (() => {
@@ -667,6 +685,107 @@ ipcMain.handle("orders:delete", async (_event, { id }) => {
   }
   orderQueries.deleteOrder(db, oid);
   return { ok: true };
+});
+
+ipcMain.handle("backup:create", async (_event, payload) => {
+  const denied = requireAdminSession();
+  if (denied) return denied;
+
+  const selection = normalizeSelection(payload?.selection);
+  const deleteAfterBackup = Boolean(payload?.deleteAfterBackup);
+  if (!selection.logins && !selection.products && !selection.orders && !selection.invoices) {
+    return { ok: false, error: "Select at least one category to back up." };
+  }
+
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const defaultName = buildBackupFileName(app.getName());
+  const dialogResult = await dialog.showSaveDialog(win, {
+    title: "Save backup",
+    defaultPath: defaultName,
+    filters: [{ name: "Database backup", extensions: ["db"] }],
+  });
+  if (dialogResult.canceled || !dialogResult.filePath) {
+    return { ok: false, cancelled: true };
+  }
+
+  let filePath = dialogResult.filePath;
+  if (!filePath.toLowerCase().endsWith(".db")) {
+    filePath = `${filePath}.db`;
+  }
+
+  const exportResult = exportBackup(db, filePath, selection, app.getName());
+  if (exportResult.ok !== true) {
+    return exportResult;
+  }
+
+  let deletedAfterBackup = false;
+  let warning;
+  if (deleteAfterBackup && (selection.orders || selection.invoices)) {
+    try {
+      deleteBackedUpTransactionalData(db, selection);
+      deletedAfterBackup = true;
+    } catch (e) {
+      warning =
+        e.message ||
+        "Backup was saved, but orders/invoices could not be removed from this app.";
+    }
+  }
+
+  return {
+    ok: true,
+    filePath,
+    deletedAfterBackup,
+    ...(warning ? { warning } : {}),
+  };
+});
+
+ipcMain.handle("backup:validate", async () => {
+  const denied = requireAdminSession();
+  if (denied) return denied;
+
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const dialogResult = await dialog.showOpenDialog(win, {
+    title: "Select backup file",
+    filters: [{ name: "Database backup", extensions: ["db"] }],
+    properties: ["openFile"],
+  });
+  if (dialogResult.canceled || !dialogResult.filePaths?.length) {
+    return { ok: false, cancelled: true };
+  }
+
+  const filePath = dialogResult.filePaths[0];
+  const validation = validateBackupFile(filePath);
+  if (validation.ok !== true) {
+    return validation;
+  }
+  return {
+    ok: true,
+    filePath,
+    meta: validation.meta,
+    counts: validation.counts,
+  };
+});
+
+ipcMain.handle("backup:restore", async (_event, { filePath }) => {
+  const denied = requireAdminSession();
+  if (denied) return denied;
+
+  const backupPath = String(filePath || "").trim();
+  if (!backupPath) {
+    return { ok: false, error: "No backup file selected." };
+  }
+
+  const validation = validateBackupFile(backupPath);
+  if (validation.ok !== true) {
+    return validation;
+  }
+
+  try {
+    const result = importBackup(db, backupPath);
+    return result;
+  } catch (e) {
+    return { ok: false, error: e.message || "Restore failed." };
+  }
 });
 
 ipcMain.handle("users:update", async (_event, { id, name, email, username }) => {
