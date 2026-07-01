@@ -30,7 +30,8 @@ function Login() {
   return (
     <AuthWrapper title="Login">
       <p className="login-sub">
-        Sign in with credentials issued by your administrator. New accounts are not self‑service.
+        Sign in with your account. On a new installation, the app will prompt you to create
+        the first administrator before you can sign in.
       </p>
       <form className="login-form" onSubmit={handleSubmit}>
         <div className="field">

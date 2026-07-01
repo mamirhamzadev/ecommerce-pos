@@ -4,6 +4,8 @@ const UPDATER_EVENT = 'app:updater-event';
 
 const ALLOWED_CHANNELS = new Set([
   'auth:login',
+  'auth:setupStatus',
+  'auth:completeSetup',
   'auth:forgotRequest',
   'auth:forgotComplete',
   'auth:changePassword',
@@ -42,6 +44,8 @@ function invoke(channel, payload) {
 contextBridge.exposeInMainWorld('api', {
   invoke,
   login: (payload) => invoke('auth:login', payload),
+  getSetupStatus: () => invoke('auth:setupStatus'),
+  completeSetup: (payload) => invoke('auth:completeSetup', payload),
   forgotRequest: (payload) => invoke('auth:forgotRequest', payload),
   forgotComplete: (payload) => invoke('auth:forgotComplete', payload),
   changePassword: (payload) => invoke('auth:changePassword', payload),

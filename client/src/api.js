@@ -15,6 +15,8 @@ function wrapApi(raw) {
     typeof raw.createBackup !== 'function' ||
     typeof raw.validateBackupFile !== 'function' ||
     typeof raw.restoreBackup !== 'function';
+  const needsSetupPatch =
+    typeof raw.getSetupStatus !== 'function' || typeof raw.completeSetup !== 'function';
   if (
     !needsInvoicesPatch &&
     !needsInvoicePrintPatch &&
@@ -23,7 +25,8 @@ function wrapApi(raw) {
     !needsPasswordPatch &&
     !needsUserPatch &&
     !needsUpdaterPatch &&
-    !needsBackupPatch
+    !needsBackupPatch &&
+    !needsSetupPatch
   ) {
     return raw;
   }
@@ -43,6 +46,12 @@ function wrapApi(raw) {
       ...(needsDeleteAllInvoicesPatch
         ? {
             deleteAllInvoices: () => raw.invoke('invoices:deleteAll'),
+          }
+        : {}),
+      ...(needsSetupPatch
+        ? {
+            getSetupStatus: () => raw.invoke('auth:setupStatus'),
+            completeSetup: (payload) => raw.invoke('auth:completeSetup', payload),
           }
         : {}),
       ...(needsUserPatch
@@ -108,6 +117,22 @@ function wrapApi(raw) {
             Promise.reject(
               new Error(
                 'Delete all invoices requires a full app restart after updating preload.',
+              ),
+            ),
+        }
+      : {}),
+    ...(needsSetupPatch
+      ? {
+          getSetupStatus: () =>
+            Promise.reject(
+              new Error(
+                'First-time setup requires a newer app build. Restart the app after updating preload.',
+              ),
+            ),
+          completeSetup: () =>
+            Promise.reject(
+              new Error(
+                'First-time setup requires a newer app build. Restart the app after updating preload.',
               ),
             ),
         }

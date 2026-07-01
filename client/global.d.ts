@@ -89,6 +89,8 @@ declare global {
       invoke: (
         channel:
           | 'auth:login'
+          | 'auth:setupStatus'
+          | 'auth:completeSetup'
           | 'auth:forgotRequest'
           | 'auth:forgotComplete'
           | 'auth:changePassword'
@@ -118,6 +120,19 @@ declare global {
         payload?: unknown,
       ) => Promise<unknown>;
       login: (payload: { username: string; password: string }) => Promise<
+        | { ok: true; token: string; user: UserPublic }
+        | { ok: false; error?: string }
+      >;
+      getSetupStatus: () => Promise<
+        | { ok: true; needsSetup: boolean }
+        | { ok: false; error?: string }
+      >;
+      completeSetup: (payload: {
+        username: string;
+        password: string;
+        name?: string;
+        email?: string;
+      }) => Promise<
         | { ok: true; token: string; user: UserPublic }
         | { ok: false; error?: string }
       >;

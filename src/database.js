@@ -4,9 +4,6 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { hashPassword } = require('./auth');
 
-const DEFAULT_ADMIN_USER = 'admin';
-const DEFAULT_ADMIN_PASS = 'admin123';
-
 /**
  * Persistent SQLite (never inside the packaged app):
  * - DATABASE_FILE: absolute path to the .db file
@@ -299,15 +296,41 @@ function initDatabase(app) {
     `UPDATE orders SET status = 'delivered' WHERE lower(status) = 'completed'`,
   );
 
-  const count = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-  if (count === 0) {
-    const hash = hashPassword(DEFAULT_ADMIN_PASS);
-    db.prepare(
-      `INSERT INTO users (username, password_hash, role, name, email) VALUES (?, ?, 'admin', ?, ?)`
-    ).run(DEFAULT_ADMIN_USER, hash, 'Administrator', '');
-  }
-
   return db;
+}
+
+function needsSetup(db) {
+  return db.prepare('SELECT COUNT(*) AS c FROM users').get().c === 0;
+}
+
+/**
+ * Create the first administrator account. Only succeeds when no users exist yet.
+ * @returns {{ ok: true, userId: number } | { ok: false, error: string }}
+ */
+function createFirstAdmin(db, { username, password, name, email }) {
+  if (!needsSetup(db)) {
+    return { ok: false, error: 'Setup has already been completed on this device.' };
+  }
+  const u = String(username || '').trim();
+  if (!u) {
+    return { ok: false, error: 'Username is required.' };
+  }
+  if (u.length > 64) {
+    return { ok: false, error: 'Username is too long.' };
+  }
+  const pwd = String(password || '');
+  if (pwd.length < 6) {
+    return { ok: false, error: 'Password must be at least 6 characters.' };
+  }
+  const displayName = String(name || '').trim().slice(0, 120) || 'Administrator';
+  const mail = String(email || '').trim().toLowerCase().slice(0, 254);
+  const hash = hashPassword(pwd);
+  const info = db
+    .prepare(
+      `INSERT INTO users (username, password_hash, role, name, email) VALUES (?, ?, 'admin', ?, ?)`,
+    )
+    .run(u, hash, displayName, mail);
+  return { ok: true, userId: Number(info.lastInsertRowid) };
 }
 
 const userQueries = {
@@ -1012,6 +1035,8 @@ const resetQueries = {
 
 module.exports = {
   initDatabase,
+  needsSetup,
+  createFirstAdmin,
   userQueries,
   productQueries,
   orderQueries,

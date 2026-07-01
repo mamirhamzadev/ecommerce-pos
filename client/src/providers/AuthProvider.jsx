@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Navigate, useLocation } from "react-router-dom";
 import { getApi } from "../api";
-import { publicRoutes } from "../constants/routes";
+import { LOGIN_ROUTE, publicRoutes, SETUP_ROUTE } from "../constants/routes";
 import Spinner from "../components/Spinner";
 import { clearUser, setUser } from "../redux/actions/user";
 import { AUTH_TOKEN_KEY } from "../session";
@@ -42,10 +42,12 @@ function AuthProvider({ children }) {
   const location = useLocation();
   const user = useSelector((state) => /** @type {any} */ (state)?.auth?.user);
   const [bootstrapping, setBootstrapping] = useState(true);
+  const [needsSetup, setNeedsSetup] = useState(false);
   const validationEpochRef = useRef(0);
 
   const pathname = location.pathname;
   const onPublicRoute = isPublicPath(pathname);
+  const onSetupRoute = pathname === SETUP_ROUTE;
   const showInitialSpinner = bootstrapping && !onPublicRoute;
 
   useEffect(() => {
@@ -54,13 +56,25 @@ function AuthProvider({ children }) {
 
     (async () => {
       try {
+        const api = getApi();
+        const setupRes = await withTimeout(api.getSetupStatus(), SESSION_VALIDATE_TIMEOUT_MS);
+        if (cancelled || epoch !== validationEpochRef.current) return;
+
+        const setupRequired = setupRes?.needsSetup === true;
+        setNeedsSetup(setupRequired);
+
+        if (setupRequired) {
+          dispatch(clearUser());
+          localStorage.removeItem(AUTH_TOKEN_KEY);
+          return;
+        }
+
         const token = localStorage.getItem(AUTH_TOKEN_KEY);
         if (!token) {
           dispatch(clearUser());
           return;
         }
 
-        const api = getApi();
         const res = await withTimeout(api.getSession(token), SESSION_VALIDATE_TIMEOUT_MS);
         if (cancelled || epoch !== validationEpochRef.current) return;
         if (res?.ok === true && res.user) {
@@ -84,6 +98,14 @@ function AuthProvider({ children }) {
       cancelled = true;
     };
   }, [dispatch, pathname]);
+
+  if (!bootstrapping && needsSetup && !onSetupRoute) {
+    return <Navigate to={SETUP_ROUTE} replace state={{ from: location }} />;
+  }
+
+  if (!bootstrapping && !needsSetup && onSetupRoute) {
+    return <Navigate to={LOGIN_ROUTE} replace />;
+  }
 
   if (showInitialSpinner) {
     return <Spinner label="Restoring session…" />;

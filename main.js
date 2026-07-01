@@ -26,6 +26,8 @@ protocol.registerSchemesAsPrivileged([
 const crypto = require("crypto");
 const {
   initDatabase,
+  needsSetup,
+  createFirstAdmin,
   userQueries,
   productQueries,
   orderQueries,
@@ -211,7 +213,46 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+ipcMain.handle("auth:setupStatus", async () => {
+  return { ok: true, needsSetup: needsSetup(db) };
+});
+
+ipcMain.handle(
+  "auth:completeSetup",
+  async (_event, { username, password, name, email }) => {
+    const result = createFirstAdmin(db, { username, password, name, email });
+    if (!result.ok) {
+      return result;
+    }
+    const row = userQueries.findById(db, result.userId);
+    if (!row) {
+      return { ok: false, error: "Could not create administrator account." };
+    }
+    const token = getSessionToken();
+    userQueries.saveSession(db, row.id, token);
+    dashboardQueries.recordLogin(db, row.id);
+    currentSession = {
+      id: row.id,
+      username: row.username,
+      name: row.name ?? "",
+      email: row.email ?? "",
+      role: row.role,
+    };
+    return {
+      ok: true,
+      token,
+      user: buildClientUserPayload(currentSession),
+    };
+  },
+);
+
 ipcMain.handle("auth:login", async (_event, { username, password }) => {
+  if (needsSetup(db)) {
+    return {
+      ok: false,
+      error: "Complete first-time setup before signing in.",
+    };
+  }
   if (!username || !password) {
     return { ok: false, error: "Username and password are required." };
   }

@@ -1,4 +1,5 @@
 import DashboardHomePage from "../pages/DashboardHomePage";
+import FirstRunSetup from "../pages/FirstRunSetup";
 import ForgotPassword from "../pages/ForgotPassword";
 import Invoices from "../pages/Invoices";
 import Login from "../pages/Login";
@@ -8,6 +9,7 @@ import Profile from "../pages/Profile";
 import ResetPassword from "../pages/ResetPassword";
 import Settings from "../pages/Settings";
 
+export const SETUP_ROUTE = "/setup";
 export const LOGIN_ROUTE = "/login";
 export const FORGOT_PASSWORD_ROUTE = "/forgot-password";
 export const RESET_PASSWORD_ROUTE = "/reset-password";
@@ -21,6 +23,11 @@ export const SETTINGS_ROUTE = "/settings";
 
 /** Auth pages (no app shell / sidebar). */
 export const publicRoutes = [
+  {
+    path: SETUP_ROUTE,
+    component: FirstRunSetup,
+    title: "First-time setup",
+  },
   {
     path: LOGIN_ROUTE,
     component: Login,
