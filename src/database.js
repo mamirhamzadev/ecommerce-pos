@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { hashPassword } = require('./auth');
@@ -6,15 +7,122 @@ const { hashPassword } = require('./auth');
 const DEFAULT_ADMIN_USER = 'admin';
 const DEFAULT_ADMIN_PASS = 'admin123';
 
-function initDatabase(app) {
-  const dir = app.getPath('userData');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+/**
+ * Persistent SQLite (never inside the packaged app):
+ * - DATABASE_FILE: absolute path to the .db file
+ * - DATABASE_DIR: absolute directory; uses app.db inside it
+ * - Default: <user home>/<app folder>/database/app.db
+ *   Example Windows: C:\Users\Hamza\POS-Mushtaq\database\app.db
+ *   App folder = APP_DATA_FOLDER env, else Electron app name (sanitized).
+ *
+ * Migrates from older defaults under Electron userData if the new file does not exist yet.
+ */
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
   }
-  const dbPath = path.join(dir, 'app.db');
+}
+
+/** Safe single path segment for a folder under the user home directory. */
+function sanitizeHomeFolderName(raw) {
+  return (
+    String(raw || '')
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64) || 'pos-mushtaq-data'
+  );
+}
+
+function homeAppDataFolderName(app) {
+  const fromEnv = process.env.APP_DATA_FOLDER?.trim();
+  if (fromEnv) return sanitizeHomeFolderName(fromEnv);
+  return sanitizeHomeFolderName(app.getName() || 'pos-mushtaq');
+}
+
+function migrateDbWithSidecars(fromDbPath, toDbPath) {
+  if (fs.existsSync(toDbPath) || !fs.existsSync(fromDbPath)) {
+    return false;
+  }
+  ensureDir(path.dirname(toDbPath));
+  const pairs = [
+    [fromDbPath, toDbPath],
+    [`${fromDbPath}-wal`, `${toDbPath}-wal`],
+    [`${fromDbPath}-shm`, `${toDbPath}-shm`],
+  ];
+  for (const [from, to] of pairs) {
+    if (fs.existsSync(from) && !fs.existsSync(to)) {
+      try {
+        fs.renameSync(from, to);
+      } catch (e) {
+        try {
+          fs.copyFileSync(from, to);
+          fs.unlinkSync(from);
+        } catch (e2) {
+          console.error('[database] Could not migrate', from, '→', to, e2);
+        }
+      }
+    }
+  }
+  return fs.existsSync(toDbPath);
+}
+
+function resolveDatabasePath(app) {
+  const fileEnv = process.env.DATABASE_FILE?.trim();
+  if (fileEnv) {
+    if (!path.isAbsolute(fileEnv)) {
+      console.warn(
+        '[database] DATABASE_FILE must be an absolute path; falling back to default location.',
+      );
+    } else {
+      ensureDir(path.dirname(fileEnv));
+      return fileEnv;
+    }
+  }
+
+  const dirEnv = process.env.DATABASE_DIR?.trim();
+  if (dirEnv) {
+    if (!path.isAbsolute(dirEnv)) {
+      console.warn(
+        '[database] DATABASE_DIR must be an absolute path; falling back to default location.',
+      );
+    } else {
+      ensureDir(dirEnv);
+      return path.join(dirEnv, 'app.db');
+    }
+  }
+
+  const dbPath = path.join(os.homedir(), homeAppDataFolderName(app), 'database', 'app.db');
+  ensureDir(path.dirname(dbPath));
+
+  if (!fs.existsSync(dbPath)) {
+    const userData = app.getPath('userData');
+    const olderLocations = [
+      path.join(userData, 'database', 'app.db'),
+      path.join(userData, 'app.db'),
+    ];
+    for (const from of olderLocations) {
+      if (migrateDbWithSidecars(from, dbPath)) {
+        console.log('[database] Migrated database →', dbPath);
+        break;
+      }
+    }
+  }
+
+  return dbPath;
+}
+
+function initDatabase(app) {
+  const dbPath = resolveDatabasePath(app);
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+
+  if (process.env.DEBUG_DB_PATH === '1' || process.env.DEBUG_DB_PATH === 'true') {
+    console.log('[database] Using', dbPath);
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -170,6 +278,18 @@ function initDatabase(app) {
       db.exec(sql);
     }
   }
+  const orderColNamesAfter = new Set(
+    db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name),
+  );
+  if (!orderColNamesAfter.has('delivery_charges')) {
+    db.exec(`ALTER TABLE orders ADD COLUMN delivery_charges REAL NOT NULL DEFAULT 0;`);
+  }
+  const orderColNamesFinal = new Set(
+    db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name),
+  );
+  if (!orderColNamesFinal.has('tracking_id')) {
+    db.exec(`ALTER TABLE orders ADD COLUMN tracking_id TEXT NOT NULL DEFAULT '';`);
+  }
   if (orderColNames.has('customer_label')) {
     db.exec(
       `UPDATE orders SET customer_name = customer_label WHERE trim(customer_name) = '' AND trim(customer_label) != ''`,
@@ -187,116 +307,7 @@ function initDatabase(app) {
     ).run(DEFAULT_ADMIN_USER, hash, 'Administrator', '');
   }
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS user_permissions (
-      user_id INTEGER PRIMARY KEY,
-      can_create_product INTEGER NOT NULL DEFAULT 1,
-      can_edit_product INTEGER NOT NULL DEFAULT 1,
-      can_remove_product INTEGER NOT NULL DEFAULT 1,
-      can_create_order INTEGER NOT NULL DEFAULT 1,
-      can_delete_order INTEGER NOT NULL DEFAULT 1,
-      can_edit_order INTEGER NOT NULL DEFAULT 1,
-      can_change_order_status INTEGER NOT NULL DEFAULT 1,
-      can_create_user INTEGER NOT NULL DEFAULT 1,
-      can_edit_user INTEGER NOT NULL DEFAULT 1,
-      can_delete_user INTEGER NOT NULL DEFAULT 1,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-  `);
-  db.exec(`
-    INSERT INTO user_permissions (
-      user_id,
-      can_create_product, can_edit_product, can_remove_product,
-      can_create_order, can_delete_order, can_edit_order, can_change_order_status,
-      can_create_user, can_edit_user, can_delete_user
-    )
-    SELECT u.id, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-    FROM users u
-    WHERE NOT EXISTS (SELECT 1 FROM user_permissions p WHERE p.user_id = u.id);
-  `);
-
   return db;
-}
-
-/** WHERE for `users u` — role + search on name, username, email, or exact id */
-function buildUserListWhere(filters) {
-  const fragments = [];
-  const params = [];
-  const role = String(filters?.role ?? 'all').trim().toLowerCase();
-  const q = String(filters?.q ?? '').trim();
-  const excludeUserId = Number(filters?.excludeUserId);
-
-  if (Number.isFinite(excludeUserId) && excludeUserId > 0) {
-    fragments.push('u.id != ?');
-    params.push(excludeUserId);
-  }
-
-  if (role === 'admin' || role === 'user') {
-    fragments.push(`(lower(trim(COALESCE(u.role,''))) = ?)`);
-    params.push(role);
-  }
-
-  if (q) {
-    const ql = q.toLowerCase();
-    fragments.push(
-      `(
-        instr(lower(COALESCE(u.name,'')), ?) > 0 OR
-        instr(lower(COALESCE(u.username,'')), ?) > 0 OR
-        instr(lower(COALESCE(u.email,'')), ?) > 0 OR
-        CAST(u.id AS TEXT) = ?
-      )`,
-    );
-    params.push(ql, ql, ql, q);
-  }
-
-  const whereSql = fragments.length ? `WHERE ${fragments.join(' AND ')}` : '';
-  return { whereSql, params };
-}
-
-/** Full access — used when no row exists (safety) and for admin defaults */
-const PERMISSIONS_ALL_TRUE = {
-  canCreateProduct: true,
-  canEditProduct: true,
-  canRemoveProduct: true,
-  canCreateOrder: true,
-  canDeleteOrder: true,
-  canEditOrder: true,
-  canChangeOrderStatus: true,
-  canCreateUser: true,
-  canEditUser: true,
-  canDeleteUser: true,
-};
-
-/** New accounts with role `user`: create order + change status only by default */
-const PERMISSIONS_NEW_USER_ROLE = {
-  canCreateProduct: false,
-  canEditProduct: false,
-  canRemoveProduct: false,
-  canCreateOrder: true,
-  canDeleteOrder: false,
-  canEditOrder: false,
-  canChangeOrderStatus: true,
-  canCreateUser: false,
-  canEditUser: false,
-  canDeleteUser: false,
-};
-
-function permissionsRowToApi(row) {
-  if (!row) {
-    return { ...PERMISSIONS_ALL_TRUE };
-  }
-  return {
-    canCreateProduct: !!row.can_create_product,
-    canEditProduct: !!row.can_edit_product,
-    canRemoveProduct: !!row.can_remove_product,
-    canCreateOrder: !!row.can_create_order,
-    canDeleteOrder: !!row.can_delete_order,
-    canEditOrder: !!row.can_edit_order,
-    canChangeOrderStatus: !!row.can_change_order_status,
-    canCreateUser: !!row.can_create_user,
-    canEditUser: !!row.can_edit_user,
-    canDeleteUser: !!row.can_delete_user,
-  };
 }
 
 const userQueries = {
@@ -319,7 +330,7 @@ const userQueries = {
   findBySessionToken(db, token) {
     return db
       .prepare(
-        `SELECT u.id, u.username, u.name, u.email, u.role
+        `SELECT u.id, u.username, u.name, u.email, u.role, s.created_at AS session_created_at
          FROM sessions s
          JOIN users u ON u.id = s.user_id
          WHERE s.token = ?`
@@ -331,7 +342,7 @@ const userQueries = {
   findCredentialsBySessionToken(db, token) {
     return db
       .prepare(
-        `SELECT u.id, u.username, u.name, u.email, u.role, u.password_hash
+        `SELECT u.id, u.username, u.name, u.email, u.role, u.password_hash, s.created_at AS session_created_at
          FROM sessions s
          JOIN users u ON u.id = s.user_id
          WHERE s.token = ?`,
@@ -350,113 +361,6 @@ const userQueries = {
     db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
   },
 
-  listUsers(db, excludeUserId) {
-    const ex = Number(excludeUserId);
-    if (Number.isFinite(ex) && ex > 0) {
-      return db
-        .prepare(
-          `SELECT id, username, name, email, role, created_at FROM users WHERE id != ? ORDER BY username`,
-        )
-        .all(ex);
-    }
-    return db
-      .prepare(
-        `SELECT id, username, name, email, role, created_at FROM users ORDER BY username`,
-      )
-      .all();
-  },
-
-  listUsersPaged(db, page, pageSize, filters = {}) {
-    const { whereSql, params: whereParams } = buildUserListWhere(filters);
-    const total = db
-      .prepare(`SELECT COUNT(*) AS c FROM users u ${whereSql}`)
-      .get(...whereParams).c;
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const safePage = Math.min(Math.max(1, page), totalPages);
-    const offset = (safePage - 1) * pageSize;
-    const rows = db
-      .prepare(
-        `SELECT u.id, u.username, u.name, u.email, u.role, u.created_at
-         FROM users u
-         ${whereSql}
-         ORDER BY u.username
-         LIMIT ? OFFSET ?`,
-      )
-      .all(...whereParams, pageSize, offset);
-    return { rows, total, page: safePage, pageSize };
-  },
-
-  createUser(db, username, passwordHash, role, name, email) {
-    const info = db
-      .prepare(
-        `INSERT INTO users (username, password_hash, role, name, email) VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(username, passwordHash, role, name, email);
-    return Number(info.lastInsertRowid);
-  },
-
-  getUserPermissionsRow(db, userId) {
-    const id = Number(userId);
-    if (!Number.isFinite(id) || id <= 0) return undefined;
-    return db
-      .prepare(`SELECT * FROM user_permissions WHERE user_id = ?`)
-      .get(id);
-  },
-
-  getUserPermissionsForApi(db, userId) {
-    const row = this.getUserPermissionsRow(db, userId);
-    return permissionsRowToApi(row);
-  },
-
-  upsertUserPermissionsFromApi(db, userId, apiPerms) {
-    const id = Number(userId);
-    if (!Number.isFinite(id) || id <= 0) return;
-    const p = { ...PERMISSIONS_ALL_TRUE, ...apiPerms };
-    db.prepare(
-      `INSERT INTO user_permissions (
-        user_id,
-        can_create_product, can_edit_product, can_remove_product,
-        can_create_order, can_delete_order, can_edit_order, can_change_order_status,
-        can_create_user, can_edit_user, can_delete_user
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(user_id) DO UPDATE SET
-        can_create_product = excluded.can_create_product,
-        can_edit_product = excluded.can_edit_product,
-        can_remove_product = excluded.can_remove_product,
-        can_create_order = excluded.can_create_order,
-        can_delete_order = excluded.can_delete_order,
-        can_edit_order = excluded.can_edit_order,
-        can_change_order_status = excluded.can_change_order_status,
-        can_create_user = excluded.can_create_user,
-        can_edit_user = excluded.can_edit_user,
-        can_delete_user = excluded.can_delete_user`,
-    ).run(
-      id,
-      p.canCreateProduct ? 1 : 0,
-      p.canEditProduct ? 1 : 0,
-      p.canRemoveProduct ? 1 : 0,
-      p.canCreateOrder ? 1 : 0,
-      p.canDeleteOrder ? 1 : 0,
-      p.canEditOrder ? 1 : 0,
-      p.canChangeOrderStatus ? 1 : 0,
-      p.canCreateUser ? 1 : 0,
-      p.canEditUser ? 1 : 0,
-      p.canDeleteUser ? 1 : 0,
-    );
-  },
-
-  seedPermissionsForNewUser(db, userId, role) {
-    const defs =
-      String(role).toLowerCase() === 'admin'
-        ? PERMISSIONS_ALL_TRUE
-        : PERMISSIONS_NEW_USER_ROLE;
-    this.upsertUserPermissionsFromApi(db, userId, defs);
-  },
-
-  deleteUser(db, id) {
-    db.prepare(`DELETE FROM users WHERE id = ?`).run(id);
-  },
-
   updatePassword(db, userId, passwordHash) {
     db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(
       passwordHash,
@@ -464,23 +368,15 @@ const userQueries = {
     );
   },
 
-  updateUserContact(db, userId, name, email) {
-    db.prepare(`UPDATE users SET name = ?, email = ? WHERE id = ?`).run(
+  updateUserProfile(db, userId, name, email, username) {
+    db.prepare(`UPDATE users SET name = ?, email = ?, username = ? WHERE id = ?`).run(
       name,
       email,
-      userId
+      username,
+      userId,
     );
   },
 
-  listAdminEmails(db) {
-    return db
-      .prepare(
-        `SELECT DISTINCT lower(trim(email)) AS email FROM users WHERE role = 'admin' AND trim(email) != ''`,
-      )
-      .all()
-      .map((r) => r.email)
-      .filter(Boolean);
-  },
 };
 
 /** WHERE for `products p` — search name, weight (g), or unit price (text match) */
@@ -625,6 +521,135 @@ function buildOrderListWhere(filters) {
   return { whereSql, params };
 }
 
+const invoiceQueries = {
+  /** INV + DDMMYY + 4-digit daily serial (e.g. INV1105260001). */
+  generateInvoiceNumber(db) {
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = String(d.getFullYear() % 100).padStart(2, '0');
+    const prefix = `INV${dd}${mm}${yy}`;
+    const row = db
+      .prepare(
+        `SELECT MAX(CAST(substr(invoice_number, 10, 4) AS INTEGER)) AS max_n
+         FROM invoices
+         WHERE length(invoice_number) = 13
+           AND substr(invoice_number, 1, 9) = ?
+           AND substr(invoice_number, 10, 4) GLOB '[0-9][0-9][0-9][0-9]'`,
+      )
+      .get(prefix);
+    let next = 1;
+    if (row && row.max_n != null && Number.isFinite(Number(row.max_n))) {
+      next = Number(row.max_n) + 1;
+    }
+    if (next > 9999) {
+      throw new Error('Daily invoice number limit (9999) reached for this date prefix.');
+    }
+    return `${prefix}${String(next).padStart(4, '0')}`;
+  },
+
+  /** Create a draft invoice for a new order (call inside the same transaction). */
+  insertForOrder(db, { invoiceNumber, amount, orderId, userId }) {
+    db.prepare(
+      `INSERT INTO invoices (invoice_number, amount, status, order_id, user_id)
+       VALUES (?, ?, 'draft', ?, ?)`,
+    ).run(invoiceNumber, amount, orderId, userId);
+  },
+
+  syncAmountForOrder(db, { orderId, amount, userId }) {
+    const row = db
+      .prepare(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`)
+      .get(orderId);
+    if (row) {
+      db.prepare(`UPDATE invoices SET amount = ? WHERE order_id = ?`).run(amount, orderId);
+    } else {
+      const invoiceNumber = invoiceQueries.generateInvoiceNumber(db);
+      invoiceQueries.insertForOrder(db, {
+        invoiceNumber,
+        amount,
+        orderId,
+        userId,
+      });
+    }
+  },
+
+  listInvoicesPaged(db, page, pageSize) {
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM invoices`).get().c;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const offset = (safePage - 1) * pageSize;
+    const rows = db
+      .prepare(
+        `SELECT i.id, i.invoice_number, i.amount, i.status, i.order_id, i.user_id, i.created_at,
+                o.order_number,
+                u.username AS user_username
+         FROM invoices i
+         LEFT JOIN orders o ON o.id = i.order_id
+         LEFT JOIN users u ON u.id = i.user_id
+         ORDER BY datetime(i.created_at) DESC, i.id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(pageSize, offset);
+    return { rows, total, page: safePage, pageSize };
+  },
+
+  deleteByOrderId(db, orderId) {
+    db.prepare(`DELETE FROM invoices WHERE order_id = ?`).run(orderId);
+  },
+
+  deleteAll(db) {
+    db.prepare(`DELETE FROM invoices`).run();
+  },
+
+  getForPrint(db, id) {
+    const row = db
+      .prepare(
+        `SELECT i.id, i.invoice_number, i.amount, i.status, i.order_id, i.user_id, i.created_at,
+                o.order_number, o.customer_name, o.customer_contact, o.customer_city,
+                o.customer_address, o.note, o.delivery_charges, o.tracking_id, o.status AS order_status,
+                u.username AS issued_by_username, u.name AS issued_by_name
+         FROM invoices i
+         LEFT JOIN orders o ON o.id = i.order_id
+         LEFT JOIN users u ON u.id = i.user_id
+         WHERE i.id = ?`,
+      )
+      .get(id);
+    if (!row) return undefined;
+    const items =
+      row.order_id != null
+        ? db
+            .prepare(
+              `SELECT product_name, qty, weight_g, unit_price, line_total
+               FROM order_items WHERE order_id = ? ORDER BY sort_order ASC, id ASC`,
+            )
+            .all(row.order_id)
+        : [];
+    return { ...row, items };
+  },
+
+  /** Print payload for an order; creates a draft invoice if one does not exist yet. */
+  getForPrintByOrderId(db, orderId) {
+    const order = orderQueries.findById(db, orderId);
+    if (!order) return undefined;
+    let inv = db
+      .prepare(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`)
+      .get(orderId);
+    if (!inv) {
+      const amount = Number(order.total) || 0;
+      invoiceQueries.syncAmountForOrder(db, {
+        orderId,
+        amount,
+        userId: order.placed_by_user_id,
+      });
+      inv = db
+        .prepare(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`)
+        .get(orderId);
+    }
+    if (!inv) return undefined;
+    return invoiceQueries.getForPrint(db, inv.id);
+  },
+};
+
 const orderQueries = {
   /** DDMMYY + 4-digit daily serial (e.g. 1105260001 for 11 May 2026, #1). */
   generateOrderNumber(db) {
@@ -665,12 +690,13 @@ const orderQueries = {
         `SELECT o.id, o.order_number,
                 o.customer_name, o.customer_contact, o.customer_city, o.customer_address,
                 o.note, o.status, o.created_at, o.placed_by_user_id,
+                o.delivery_charges, o.tracking_id,
                 u.username AS placed_by_username,
                 (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS line_count,
-                COALESCE(
+                (COALESCE(
                   (SELECT SUM(i.line_total) FROM order_items i WHERE i.order_id = o.id),
-                  o.total
-                ) AS total
+                  0
+                ) + COALESCE(o.delivery_charges, 0)) AS total
          FROM orders o
          LEFT JOIN users u ON u.id = o.placed_by_user_id
          ${whereSql}
@@ -697,6 +723,7 @@ const orderQueries = {
     const orderRow = db
       .prepare(
         `SELECT o.id, o.order_number, o.product_name, o.qty, o.weight_g, o.unit_price, o.total,
+                o.delivery_charges, o.tracking_id,
                 o.customer_name, o.customer_contact, o.customer_city, o.customer_address,
                 o.note, o.status, o.created_at, o.placed_by_user_id,
                 u.username AS placed_by_username
@@ -720,22 +747,29 @@ const orderQueries = {
       note,
       status,
       placedByUserId,
+      deliveryCharges,
+      trackingId,
     },
   ) {
+    const rawDel = Number(deliveryCharges);
+    const safeDelivery =
+      Number.isFinite(rawDel) && rawDel >= 0 ? rawDel : 0;
+    const safeTrackingId = String(trackingId || '').trim().slice(0, 120);
     let newId = null;
     const tx = db.transaction(() => {
-      let sumTotal = 0;
+      let sumLines = 0;
       for (const L of lines) {
-        sumTotal += L.qty * L.unitPrice;
+        sumLines += L.qty * L.unitPrice;
       }
+      const grandTotal = sumLines + safeDelivery;
       const first = lines[0] || {};
       const info = db
         .prepare(
           `INSERT INTO orders (
             order_number, product_name, qty, weight_g, unit_price, total,
             customer_name, customer_contact, customer_city, customer_address, note,
-            status, placed_by_user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            delivery_charges, tracking_id, status, placed_by_user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           orderNumber,
@@ -743,12 +777,14 @@ const orderQueries = {
           first.qty ?? 1,
           first.weightG ?? 0,
           first.unitPrice ?? 0,
-          sumTotal,
+          grandTotal,
           customerName,
           customerContact,
           customerCity,
           customerAddress,
           note,
+          safeDelivery,
+          safeTrackingId,
           status,
           placedByUserId,
         );
@@ -770,6 +806,13 @@ const orderQueries = {
           lineTotal,
         );
       });
+      const invoiceNumber = invoiceQueries.generateInvoiceNumber(db);
+      invoiceQueries.insertForOrder(db, {
+        invoiceNumber,
+        amount: grandTotal,
+        orderId: newId,
+        userId: placedByUserId,
+      });
     });
     tx();
     return orderQueries.findById(db, newId);
@@ -786,31 +829,41 @@ const orderQueries = {
       customerAddress,
       note,
       status,
+      deliveryCharges,
+      placedByUserId,
+      trackingId,
     },
   ) {
+    const rawDel = Number(deliveryCharges);
+    const safeDelivery =
+      Number.isFinite(rawDel) && rawDel >= 0 ? rawDel : 0;
+    const safeTrackingId = String(trackingId || '').trim().slice(0, 120);
     const tx = db.transaction(() => {
-      let sumTotal = 0;
+      let sumLines = 0;
       for (const L of lines) {
-        sumTotal += L.qty * L.unitPrice;
+        sumLines += L.qty * L.unitPrice;
       }
+      const grandTotal = sumLines + safeDelivery;
       const first = lines[0] || {};
       db.prepare(
         `UPDATE orders SET
           product_name = ?, qty = ?, weight_g = ?, unit_price = ?, total = ?,
           customer_name = ?, customer_contact = ?, customer_city = ?, customer_address = ?,
-          note = ?, status = ?
+          note = ?, delivery_charges = ?, tracking_id = ?, status = ?
          WHERE id = ?`,
       ).run(
         String(first.productName || '').slice(0, 200),
         first.qty ?? 1,
         first.weightG ?? 0,
         first.unitPrice ?? 0,
-        sumTotal,
+        grandTotal,
         customerName,
         customerContact,
         customerCity,
         customerAddress,
         note,
+        safeDelivery,
+        safeTrackingId,
         status,
         id,
       );
@@ -832,6 +885,11 @@ const orderQueries = {
           lineTotal,
         );
       });
+      invoiceQueries.syncAmountForOrder(db, {
+        orderId: id,
+        amount: grandTotal,
+        userId: placedByUserId,
+      });
     });
     tx();
     return orderQueries.findById(db, id);
@@ -842,7 +900,11 @@ const orderQueries = {
   },
 
   deleteOrder(db, id) {
-    db.prepare(`DELETE FROM orders WHERE id = ?`).run(id);
+    const tx = db.transaction(() => {
+      invoiceQueries.deleteByOrderId(db, id);
+      db.prepare(`DELETE FROM orders WHERE id = ?`).run(id);
+    });
+    tx();
   },
 };
 
@@ -853,9 +915,7 @@ const dashboardQueries = {
 
   getSnapshot(db, limits) {
     const limOrders = limits?.recentOrders ?? 3;
-    const limLogins = limits?.recentLogins ?? 3;
-    const limSignups = limits?.recentSignups ?? 3;
-
+    const limProducts = limits?.recentProducts ?? 3;
     const users = db.prepare(`SELECT COUNT(*) AS c FROM users`).get().c;
     const products = db.prepare(`SELECT COUNT(*) AS c FROM products`).get().c;
     const orders = db.prepare(`SELECT COUNT(*) AS c FROM orders`).get().c;
@@ -863,6 +923,16 @@ const dashboardQueries = {
     const ordersOpen = db
       .prepare(
         `SELECT COUNT(*) AS c FROM orders WHERE lower(status) IN ('pending','open','held')`
+      )
+      .get().c;
+    const ordersCancelled = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM orders WHERE lower(trim(COALESCE(status,''))) = 'cancelled'`
+      )
+      .get().c;
+    const ordersDelivered = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM orders WHERE lower(trim(COALESCE(status,''))) IN ('delivered','completed')`,
       )
       .get().c;
     const invoicesUnpaid = db
@@ -874,10 +944,10 @@ const dashboardQueries = {
       .prepare(
         `SELECT o.id, o.order_number,
                 (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS line_count,
-                COALESCE(
+                (COALESCE(
                   (SELECT SUM(i.line_total) FROM order_items i WHERE i.order_id = o.id),
-                  o.total
-                ) AS total,
+                  0
+                ) + COALESCE(o.delivery_charges, 0)) AS total,
                 o.customer_name, o.status, o.created_at,
                 u.username AS placed_by_username
          FROM orders o
@@ -888,24 +958,14 @@ const dashboardQueries = {
       )
       .all(limOrders);
 
-    const recentLogins = db
+    const recentProducts = db
       .prepare(
-        `SELECT e.logged_in_at, u.id AS user_id, u.username, u.name
-         FROM login_events e
-         JOIN users u ON u.id = e.user_id
-         ORDER BY datetime(e.logged_in_at) DESC, e.id DESC
-         LIMIT ?`
+        `SELECT p.id, p.name, p.sku, p.price, p.weight_g, p.created_at
+         FROM products p
+         ORDER BY datetime(p.created_at) DESC, p.id DESC
+         LIMIT ?`,
       )
-      .all(limLogins);
-
-    const recentSignups = db
-      .prepare(
-        `SELECT id, username, name, role, created_at
-         FROM users
-         ORDER BY datetime(created_at) DESC, id DESC
-         LIMIT ?`
-      )
-      .all(limSignups);
+      .all(limProducts);
 
     return {
       counts: {
@@ -914,11 +974,12 @@ const dashboardQueries = {
         orders,
         invoices,
         ordersOpen,
+        ordersDelivered,
+        ordersCancelled,
         invoicesUnpaid,
       },
       recentOrders,
-      recentLogins,
-      recentSignups,
+      recentProducts,
     };
   },
 };
@@ -954,6 +1015,7 @@ module.exports = {
   userQueries,
   productQueries,
   orderQueries,
+  invoiceQueries,
   resetQueries,
   dashboardQueries,
 };

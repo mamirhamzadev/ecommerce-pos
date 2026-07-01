@@ -1,61 +1,81 @@
 import { useEffect, useState } from 'react';
-import { getApi } from '../../api';
-import { getStoredAuthToken } from '../../session';
-import { PasswordField } from '../PasswordField';
+import { useDispatch, useSelector } from 'react-redux';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { getApi } from '../api';
+import { PasswordField } from '../components/PasswordField';
+import { notifyError, notifySuccess } from '../lib/notify';
+import { setUser } from '../redux/actions/user';
+import { getStoredAuthToken } from '../session';
 
-/**
- * @param {{
- *   user: { id: number, username: string, name?: string, email?: string, role: string },
- *   intent: 'view' | 'edit',
- *   onSaved: () => void | Promise<void>,
- * }} props
- */
-export function ProfileSection({ user, intent, onSaved }) {
+function Profile() {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const user = useSelector((state) => /** @type {any} */ (state)?.auth?.user);
+
+  const intent = location.pathname.endsWith('/edit') ? 'edit' : 'view';
+
   const [mode, setMode] = useState(intent === 'edit' ? 'edit' : 'view');
-  const [name, setName] = useState(
-    typeof user.name === 'string' ? user.name : '',
-  );
-  const [email, setEmail] = useState(
-    typeof user.email === 'string' ? user.email : '',
-  );
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [username, setUsername] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [pwdError, setPwdError] = useState('');
-  const [pwdSuccess, setPwdSuccess] = useState('');
   const [pwdSaving, setPwdSaving] = useState(false);
 
   useEffect(() => {
     setMode(intent === 'edit' ? 'edit' : 'view');
-  }, [intent, user.id]);
+  }, [intent, user?.id]);
 
   useEffect(() => {
+    if (!user) return;
+    setUsername(typeof user.username === 'string' ? user.username : '');
     setName(typeof user.name === 'string' ? user.name : '');
     setEmail(typeof user.email === 'string' ? user.email : '');
-  }, [user.name, user.email, user.id]);
+  }, [user?.name, user?.email, user?.username, user?.id]);
+
+  async function refreshUser() {
+    const token = getStoredAuthToken();
+    if (!token) return;
+    const res = await getApi().getSession(token);
+    if (res?.ok === true && res.user) {
+      dispatch(setUser(res.user, token));
+    }
+  }
+
+  function leaveEditMode() {
+    setMode('view');
+    if (location.pathname.endsWith('/edit')) {
+      navigate('/profile', { replace: true });
+    }
+  }
 
   async function handleSave(e) {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    if (!user) return;
+    const u = String(username).trim();
+    if (!u) {
+      notifyError('Username is required.');
+      return;
+    }
     setSaving(true);
     try {
       const res = await getApi().updateUser({
         id: user.id,
         name,
         email,
+        username: u,
       });
       if (!res.ok) {
-        setError(res.error || 'Could not save profile.');
+        notifyError(res.error || 'Could not save profile.');
         return;
       }
-      setSuccess('Profile updated.');
-      setMode('view');
-      await onSaved();
+      notifySuccess('Profile updated.');
+      await refreshUser();
+      leaveEditMode();
     } finally {
       setSaving(false);
     }
@@ -63,19 +83,17 @@ export function ProfileSection({ user, intent, onSaved }) {
 
   async function handleChangePassword(e) {
     e.preventDefault();
-    setPwdError('');
-    setPwdSuccess('');
     const token = getStoredAuthToken();
     if (!token) {
-      setPwdError('You are not signed in.');
+      notifyError('You are not signed in.');
       return;
     }
     if (newPassword.length < 6) {
-      setPwdError('New password must be at least 6 characters.');
+      notifyError('New password must be at least 6 characters.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPwdError('New password and confirmation do not match.');
+      notifyError('New password and confirmation do not match.');
       return;
     }
     setPwdSaving(true);
@@ -85,17 +103,21 @@ export function ProfileSection({ user, intent, onSaved }) {
         currentPassword,
         newPassword,
       });
-      if (!res.ok) {
-        setPwdError(res.error || 'Could not change password.');
+      if (res.ok !== true) {
+        notifyError(res.error || 'Could not change password.');
         return;
       }
-      setPwdSuccess('Password updated.');
+      notifySuccess('Password updated.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } finally {
       setPwdSaving(false);
     }
+  }
+
+  if (!user) {
+    return null;
   }
 
   const displayName =
@@ -112,9 +134,7 @@ export function ProfileSection({ user, intent, onSaved }) {
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => {
-              setError('');
-              setSuccess('');
-              setMode('edit');
+              navigate('/profile/edit');
             }}
           >
             Edit
@@ -140,25 +160,24 @@ export function ProfileSection({ user, intent, onSaved }) {
                 : '—'}
             </dd>
           </div>
-          <div>
-            <dt>Role</dt>
-            <dd>
-              <span
-                className={
-                  user.role === 'admin' ? 'badge badge-admin' : 'badge badge-user'
-                }
-              >
-                {user.role}
-              </span>
-            </dd>
-          </div>
         </dl>
       ) : (
         <form className="profile-edit-form" onSubmit={handleSave}>
           <p className="section-desc section-desc-tight">
-            Update how you appear in the app and where password-reset messages are
-            sent.
+            Update your sign-in name, how you appear in the app, and where password-reset messages
+            are sent.
           </p>
+          <div className="field">
+            <span className="field-label">Username</span>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              maxLength={80}
+              autoComplete="username"
+              required
+            />
+          </div>
           <div className="field">
             <span className="field-label">Display name</span>
             <input
@@ -179,26 +198,15 @@ export function ProfileSection({ user, intent, onSaved }) {
               autoComplete="email"
             />
           </div>
-          {error ? (
-            <div className="alert alert-error" role="alert">
-              {error}
-            </div>
-          ) : null}
-          {success ? (
-            <div className="alert alert-success" role="status">
-              {success}
-            </div>
-          ) : null}
           <div className="form-footer profile-edit-actions">
             <button
               type="button"
               className="btn btn-ghost btn-sm"
               onClick={() => {
-                setError('');
-                setSuccess('');
+                setUsername(typeof user.username === 'string' ? user.username : '');
                 setName(typeof user.name === 'string' ? user.name : '');
                 setEmail(typeof user.email === 'string' ? user.email : '');
-                setMode('view');
+                leaveEditMode();
               }}
             >
               Cancel
@@ -248,16 +256,6 @@ export function ProfileSection({ user, intent, onSaved }) {
               required
             />
           </div>
-          {pwdError ? (
-            <div className="alert alert-error" role="alert">
-              {pwdError}
-            </div>
-          ) : null}
-          {pwdSuccess ? (
-            <div className="alert alert-success" role="status">
-              {pwdSuccess}
-            </div>
-          ) : null}
           <div className="form-footer profile-edit-actions">
             <button
               type="submit"
@@ -272,3 +270,6 @@ export function ProfileSection({ user, intent, onSaved }) {
     </section>
   );
 }
+
+export { Profile as ProfileSection };
+export default Profile;

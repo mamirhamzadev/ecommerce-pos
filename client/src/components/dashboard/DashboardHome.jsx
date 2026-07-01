@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getApi } from '../../api';
+import { notifyError } from '../../lib/notify';
 import { FaIcon } from '../FaIcon';
 import { RelativeTime } from '../../RelativeTime';
 
@@ -9,14 +11,27 @@ const pkr = new Intl.NumberFormat('en-PK', {
   maximumFractionDigits: 2,
 });
 
+function formatWeightG(g) {
+  const n = Number(g);
+  if (!Number.isFinite(n)) return '—';
+  if (Number.isInteger(n)) return `${n} g`;
+  return `${n.toFixed(2)} g`;
+}
+
+function orderHBarWidthPct(count, max) {
+  const n = Math.max(0, Number(count) || 0);
+  const m = Math.max(1, Number(max) || 0);
+  return (n / m) * 100;
+}
+
 /**
  * @param {{
  *   active: boolean,
  *   isAdmin: boolean,
- *   onOpenModule: (id: 'products' | 'orders' | 'invoices' | 'users') => void,
  * }} props
  */
-export function DashboardHome({ active, isAdmin, onOpenModule }) {
+export function DashboardHome({ active, isAdmin }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
@@ -41,7 +56,9 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
       setData(res);
       return;
     }
-    setError(res.error || 'Could not load dashboard.');
+    const msg = res.error || 'Could not load dashboard.';
+    setError(msg);
+    notifyError(msg);
   }, []);
 
   useEffect(() => {
@@ -174,9 +191,7 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
   if (error) {
     return (
       <div className="dashboard-home">
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
+        <p className="empty-hint">Could not load the overview. Use Retry below or check your connection.</p>
         <button type="button" className="btn btn-ghost btn-sm" onClick={load}>
           Retry
         </button>
@@ -184,18 +199,20 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
     );
   }
 
-  const c = isAdmin ? data?.counts : null;
+  const c = data?.counts;
   const recentOrders = data?.recentOrders ?? [];
-  const recentLogins = isAdmin ? (data?.recentLogins ?? []) : [];
-  const recentSignups = isAdmin ? (data?.recentSignups ?? []) : [];
+  const recentProducts = data?.recentProducts ?? [];
+
+  const pendingOrders = Number(c?.ordersOpen) || 0;
+  const deliveredOrders = Number(c?.ordersDelivered) || 0;
+  const cancelledOrders = Number(c?.ordersCancelled) || 0;
+  const orderStatusMax = Math.max(pendingOrders, deliveredOrders, cancelledOrders, 1);
 
   return (
     <div className="dashboard-home">
       <div className="dashboard-home-toolbar">
         <p className="section-desc section-desc-tight" style={{ margin: 0 }}>
-          {isAdmin
-            ? 'Live counts and the latest three pending orders, sign-ins, and new accounts.'
-            : 'The latest pending orders (up to three).'}
+          Overview, recent activity, and order status mix.
         </p>
         <button
           type="button"
@@ -209,53 +226,47 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
         </button>
       </div>
 
-      {isAdmin ? (
-        <div className="stat-grid">
-          <button
-            type="button"
-            className="stat-card"
-            onClick={() => onOpenModule('products')}
-          >
-            <span className="stat-card-label">Products</span>
-            <span className="stat-card-value">{c?.products ?? 0}</span>
-            <span className="stat-card-hint">Name, weight & unit price</span>
-          </button>
-          <button
-            type="button"
-            className="stat-card"
-            onClick={() => onOpenModule('orders')}
-          >
-            <span className="stat-card-label">Orders</span>
-            <span className="stat-card-value">{c?.orders ?? 0}</span>
-            <span className="stat-card-hint">
-              {c?.ordersOpen ?? 0} open / pending
-            </span>
-          </button>
-          <button
-            type="button"
-            className="stat-card"
-            onClick={() => onOpenModule('invoices')}
-          >
-            <span className="stat-card-label">Invoices</span>
-            <span className="stat-card-value">{c?.invoices ?? 0}</span>
-            <span className="stat-card-hint">
-              {c?.invoicesUnpaid ?? 0} unpaid / draft
-            </span>
-          </button>
-          <button
-            type="button"
-            className="stat-card"
-            onClick={() => onOpenModule('users')}
-            title="Open users"
-          >
-            <span className="stat-card-label">Users</span>
-            <span className="stat-card-value">{c?.users ?? 0}</span>
-            <span className="stat-card-hint">Staff accounts</span>
-          </button>
-        </div>
-      ) : null}
+      <div className="stat-grid">
+        <button
+          type="button"
+          className="stat-card"
+          onClick={() => navigate('/products')}
+        >
+          <span className="stat-card-label">Products</span>
+          <span className="stat-card-value">{c?.products ?? 0}</span>
+          <span className="stat-card-hint">Name, weight & unit price</span>
+        </button>
+        <button
+          type="button"
+          className="stat-card"
+          onClick={() => navigate('/orders')}
+        >
+          <span className="stat-card-label">Orders</span>
+          <span className="stat-card-value">{c?.orders ?? 0}</span>
+          <span className="stat-card-hint">{c?.ordersOpen ?? 0} open / pending</span>
+        </button>
+        <button
+          type="button"
+          className="stat-card"
+          onClick={() => navigate('/invoices')}
+        >
+          <span className="stat-card-label">Invoices</span>
+          <span className="stat-card-value">{c?.invoices ?? 0}</span>
+          <span className="stat-card-hint">{c?.invoicesUnpaid ?? 0} unpaid / draft</span>
+        </button>
+        <button
+          type="button"
+          className="stat-card"
+          onClick={() => navigate('/orders')}
+          title="Open orders"
+        >
+          <span className="stat-card-label">Cancelled orders</span>
+          <span className="stat-card-value">{c?.ordersCancelled ?? 0}</span>
+          <span className="stat-card-hint">All-time cancelled</span>
+        </button>
+      </div>
 
-      {isAdmin ? (
+      {/* {isAdmin ? (
         <section className="card dash-panel dash-panel-wide" style={{ marginTop: '1rem' }}>
           <div className="dash-panel-head">
             <h3 className="section-title section-title-sm">Software update</h3>
@@ -344,9 +355,9 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
             </p>
           ) : null}
         </section>
-      ) : null}
+      ) : null} */}
 
-      <div className={`dash-panels${isAdmin ? '' : ' dash-panels-user-only'}`}>
+      <div className="dash-panels">
         <section className="card dash-panel">
           <div className="dash-panel-head">
             <h3 className="section-title section-title-sm">Recent pending orders</h3>
@@ -354,7 +365,7 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => onOpenModule('orders')}
+                onClick={() => navigate('/orders')}
               >
                 View all
               </button>
@@ -396,96 +407,111 @@ export function DashboardHome({ active, isAdmin, onOpenModule }) {
           )}
         </section>
 
-        {isAdmin ? (
-          <section className="card dash-panel">
-            <div className="dash-panel-head">
-              <h3 className="section-title section-title-sm">Recent sign-ins</h3>
+        <section className="card dash-panel">
+          <div className="dash-panel-head">
+            <h3 className="section-title section-title-sm">Recent products</h3>
+            <div className="dash-panel-head-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => navigate('/products')}
+              >
+                View all
+              </button>
             </div>
-            {recentLogins.length === 0 ? (
-              <p className="dash-panel-empty">No sign-in history yet.</p>
-            ) : (
-              <div className="table-wrap dash-table-wrap">
-                <table className="data-table data-table-compact">
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Signed in</th>
+          </div>
+          {recentProducts.length === 0 ? (
+            <p className="dash-panel-empty">No products in the catalog yet.</p>
+          ) : (
+            <div className="table-wrap dash-table-wrap">
+              <table className="data-table data-table-compact">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Weight</th>
+                    <th>Unit price</th>
+                    <th>Added</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentProducts.map((p) => (
+                    <tr key={p.id}>
+                      <td className="table-strong">{p.name || '—'}</td>
+                      <td className="cell-mono">{formatWeightG(p.weight_g)}</td>
+                      <td className="cell-mono">{pkr.format(Number(p.price) || 0)}</td>
+                      <td className="cell-mono">
+                        <RelativeTime value={p.created_at} />
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {recentLogins.map((row, i) => (
-                      <tr key={`${row.user_id}-${row.logged_in_at}-${i}`}>
-                        <td>
-                          <span className="table-strong">
-                            {row.name?.trim() || row.username}
-                          </span>
-                          <span className="muted dash-sub"> @{row.username}</span>
-                        </td>
-                        <td className="cell-mono">
-                          <RelativeTime value={row.logged_in_at} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        ) : null}
-
-        {isAdmin ? (
-          <section className="card dash-panel dash-panel-wide">
-            <div className="dash-panel-head">
-              <h3 className="section-title section-title-sm">New accounts</h3>
-              <div className="dash-panel-head-actions">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => onOpenModule('users')}
-                >
-                  Manage users
-                </button>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            {recentSignups.length === 0 ? (
-              <p className="dash-panel-empty">No newly created accounts yet.</p>
-            ) : (
-              <div className="table-wrap dash-table-wrap">
-                <table className="data-table data-table-compact">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Username</th>
-                      <th>Role</th>
-                      <th>Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentSignups.map((u) => (
-                      <tr key={u.id}>
-                        <td>{u.name?.trim() || '—'}</td>
-                        <td className="cell-mono">{u.username}</td>
-                        <td>
-                          <span
-                            className={
-                              u.role === 'admin' ? 'badge badge-admin' : 'badge badge-user'
-                            }
-                          >
-                            {u.role}
-                          </span>
-                        </td>
-                        <td className="cell-mono">
-                          <RelativeTime value={u.created_at} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        ) : null}
+          )}
+        </section>
       </div>
+
+      <section
+        className="card dash-panel dash-order-status"
+        aria-labelledby="order-status-bars-heading"
+      >
+        <div className="dash-panel-head">
+          <div>
+            <h3 id="order-status-bars-heading" className="section-title section-title-sm">
+              Orders by status
+            </h3>
+            <p className="section-desc section-desc-tight order-status-sub">
+              Pending, delivered, and cancelled orders (bar length is relative to the largest count).
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate('/orders')}
+          >
+            View orders
+          </button>
+        </div>
+
+        <div className="order-hbar-list" role="list">
+          <div className="order-hbar-row" role="listitem">
+            <div className="order-hbar-top">
+              <span className="order-hbar-title">Pending</span>
+              <span className="order-hbar-count cell-mono">{pendingOrders}</span>
+            </div>
+            <div className="order-hbar-track" aria-hidden="true">
+              <div
+                className="order-hbar-fill order-hbar-fill--pending"
+                style={{ width: `${orderHBarWidthPct(pendingOrders, orderStatusMax)}%` }}
+              />
+            </div>
+          </div>
+          <div className="order-hbar-row" role="listitem">
+            <div className="order-hbar-top">
+              <span className="order-hbar-title">Delivered</span>
+              <span className="order-hbar-count cell-mono">{deliveredOrders}</span>
+            </div>
+            <div className="order-hbar-track" aria-hidden="true">
+              <div
+                className="order-hbar-fill order-hbar-fill--delivered"
+                style={{ width: `${orderHBarWidthPct(deliveredOrders, orderStatusMax)}%` }}
+              />
+            </div>
+          </div>
+          <div className="order-hbar-row" role="listitem">
+            <div className="order-hbar-top">
+              <span className="order-hbar-title">Cancelled</span>
+              <span className="order-hbar-count cell-mono">{cancelledOrders}</span>
+            </div>
+            <div className="order-hbar-track" aria-hidden="true">
+              <div
+                className="order-hbar-fill order-hbar-fill--cancelled"
+                style={{ width: `${orderHBarWidthPct(cancelledOrders, orderStatusMax)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

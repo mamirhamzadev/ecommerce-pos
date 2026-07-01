@@ -1,12 +1,27 @@
 const path = require("path");
+const fs = require("fs");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, protocol } = require("electron");
+
+/** Lets the renderer use BrowserRouter in production (history API) instead of file:// path quirks. */
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "app",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
 const crypto = require("crypto");
 const {
   initDatabase,
   userQueries,
   productQueries,
   orderQueries,
+  invoiceQueries,
   resetQueries,
   dashboardQueries,
 } = require("./src/database");
@@ -18,9 +33,6 @@ let mainWindow;
 let db;
 /** @type {{ id: number, username: string, name: string, email: string, role: 'admin' | 'user' } | null} */
 let currentSession = null;
-
-/** Pending email code for creating a new admin (key = logged-in admin user id). */
-const pendingAdminInviteByAdminId = new Map();
 
 function normalizePersonName(value) {
   return String(value || "")
@@ -49,46 +61,60 @@ function normalizeOrderStatus(raw) {
   return "pending";
 }
 
-const PERMISSION_API_KEYS = [
-  "canCreateProduct",
-  "canEditProduct",
-  "canRemoveProduct",
-  "canCreateOrder",
-  "canDeleteOrder",
-  "canEditOrder",
-  "canChangeOrderStatus",
-  "canCreateUser",
-  "canEditUser",
-  "canDeleteUser",
-];
-
 function buildClientUserPayload(sessionLike) {
-  const permissions = userQueries.getUserPermissionsForApi(db, sessionLike.id);
   return {
     id: sessionLike.id,
     username: sessionLike.username,
     name: sessionLike.name ?? "",
     email: sessionLike.email ?? "",
     role: sessionLike.role,
-    permissions,
   };
 }
 
-function sessionHasPermission(key) {
-  if (!currentSession) return false;
-  const p = userQueries.getUserPermissionsForApi(db, currentSession.id);
-  return Boolean(p[key]);
+const SESSION_TTL_DAYS = (() => {
+  const n = Number(process.env.SESSION_TTL_DAYS);
+  return Number.isFinite(n) && n > 0 ? n : 30;
+})();
+
+/** @param {{ session_created_at?: string } | null | undefined} row */
+function isSessionExpired(row) {
+  const raw = row?.session_created_at;
+  if (!raw) return true;
+  const created = new Date(String(raw).replace(" ", "T")).getTime();
+  if (Number.isNaN(created)) return true;
+  const maxMs = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() - created > maxMs;
 }
 
-function mergePermissionPayloadFromClient(previous, raw) {
-  const out = { ...previous };
-  if (!raw || typeof raw !== "object") return out;
-  for (const k of PERMISSION_API_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(raw, k)) {
-      out[k] = raw[k] === true;
+function registerRendererAppProtocol() {
+  const distPath = path.resolve(__dirname, "dist", "renderer");
+  protocol.registerFileProtocol("app", (request, callback) => {
+    try {
+      const parsed = new URL(request.url);
+      let pathname = decodeURIComponent(parsed.pathname || "/");
+      if (pathname === "/" || pathname === "") {
+        callback({ path: path.join(distPath, "index.html") });
+        return;
+      }
+      const relative = pathname.replace(/^\/+/, "");
+      const candidate = path.resolve(distPath, relative);
+      const distResolved = path.resolve(distPath);
+      if (
+        candidate !== distResolved &&
+        !candidate.startsWith(distResolved + path.sep)
+      ) {
+        callback({ path: path.join(distPath, "index.html") });
+        return;
+      }
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        callback({ path: candidate });
+        return;
+      }
+      callback({ path: path.join(distPath, "index.html") });
+    } catch {
+      callback({ path: path.join(distPath, "index.html") });
     }
-  }
-  return out;
+  });
 }
 
 function createWindow() {
@@ -112,7 +138,7 @@ function createWindow() {
     mainWindow.loadURL(devServerUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    mainWindow.loadFile(path.join(__dirname, "dist", "renderer", "index.html"));
+    mainWindow.loadURL("app://./index.html");
   }
 }
 
@@ -125,6 +151,9 @@ function generatePasswordResetCode() {
 }
 
 app.whenReady().then(() => {
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    registerRendererAppProtocol();
+  }
   db = initDatabase(app);
   registerAppUpdater({
     app,
@@ -193,7 +222,7 @@ ipcMain.handle("auth:forgotRequest", async (_event, { username }) => {
     return {
       ok: false,
       error:
-        "This account has no valid email on file. Contact an administrator to add one.",
+        "This account has no valid email on file. Add an email in your profile to use password reset.",
     };
   }
   const code = generatePasswordResetCode();
@@ -258,6 +287,13 @@ ipcMain.handle("auth:session", async (_event, token) => {
   if (!row) {
     return { ok: false };
   }
+  if (isSessionExpired(row)) {
+    userQueries.deleteSession(db, row.id);
+    if (currentSession?.id === row.id) {
+      currentSession = null;
+    }
+    return { ok: false };
+  }
   currentSession = {
     id: row.id,
     username: row.username,
@@ -276,6 +312,13 @@ ipcMain.handle(
     }
     const row = userQueries.findCredentialsBySessionToken(db, token);
     if (!row) {
+      return { ok: false, error: "Session expired. Sign in again." };
+    }
+    if (isSessionExpired(row)) {
+      userQueries.deleteSession(db, row.id);
+      if (currentSession?.id === row.id) {
+        currentSession = null;
+      }
       return { ok: false, error: "Session expired. Sign in again." };
     }
     const cur = String(currentPassword || "");
@@ -304,47 +347,13 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle("users:list", async () => {
-  if (!currentSession || currentSession.role !== "admin") {
-    return { ok: false, error: "Forbidden." };
-  }
-  const users = userQueries.listUsers(db, currentSession.id);
-  return { ok: true, users };
-});
-
-ipcMain.handle("users:listPaged", async (_event, payload) => {
-  if (!currentSession || currentSession.role !== "admin") {
-    return { ok: false, error: "Forbidden." };
-  }
-  const p = Math.max(1, Math.floor(Number(payload?.page)) || 1);
-  const ps = Math.min(100, Math.max(5, Math.floor(Number(payload?.pageSize)) || 10));
-  const roleRaw = typeof payload?.role === "string" ? payload.role.trim().toLowerCase() : "";
-  const role =
-    roleRaw === "admin" || roleRaw === "user" ? roleRaw : "all";
-  const q = typeof payload?.q === "string" ? payload.q.trim() : "";
-  const { rows, total, page: safePage, pageSize: psOut } =
-    userQueries.listUsersPaged(db, p, ps, {
-      role,
-      q,
-      excludeUserId: currentSession.id,
-    });
-  return {
-    ok: true,
-    users: rows,
-    total,
-    page: safePage,
-    pageSize: psOut,
-  };
-});
-
 ipcMain.handle("dashboard:snapshot", async () => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };
   }
   const data = dashboardQueries.getSnapshot(db, {
     recentOrders: 3,
-    recentLogins: 3,
-    recentSignups: 3,
+    recentProducts: 3,
   });
   return { ok: true, ...data };
 });
@@ -382,9 +391,6 @@ ipcMain.handle(
     if (!currentSession) {
       return { ok: false, error: "Forbidden." };
     }
-    if (!sessionHasPermission("canCreateProduct")) {
-      return { ok: false, error: "You do not have permission to create products." };
-    }
     const n = String(name || "").trim();
     if (!n) {
       return { ok: false, error: "Product name is required." };
@@ -407,9 +413,6 @@ ipcMain.handle(
   async (_event, { id, name, weightG, unitPricePkr }) => {
     if (!currentSession) {
       return { ok: false, error: "Forbidden." };
-    }
-    if (!sessionHasPermission("canEditProduct")) {
-      return { ok: false, error: "You do not have permission to edit products." };
     }
     const pid = Number(id);
     if (!pid || !productQueries.findById(db, pid)) {
@@ -435,9 +438,6 @@ ipcMain.handle(
 ipcMain.handle("products:delete", async (_event, { id }) => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };
-  }
-  if (!sessionHasPermission("canRemoveProduct")) {
-    return { ok: false, error: "You do not have permission to remove products." };
   }
   const pid = Number(id);
   if (!pid || !productQueries.findById(db, pid)) {
@@ -508,12 +508,65 @@ function normalizeOrderLines(payloadLines) {
   return { ok: true, lines };
 }
 
-ipcMain.handle("orders:create", async (_event, payload) => {
+function normalizeDeliveryCharges(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    return { ok: false, error: "Delivery charges must be zero or a positive number." };
+  }
+  return { ok: true, value: n };
+}
+
+ipcMain.handle("invoices:listPaged", async (_event, payload) => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };
   }
-  if (!sessionHasPermission("canCreateOrder")) {
-    return { ok: false, error: "You do not have permission to create orders." };
+  const p = Math.max(1, Math.floor(Number(payload?.page)) || 1);
+  const ps = Math.min(100, Math.max(5, Math.floor(Number(payload?.pageSize)) || 10));
+  const { rows, total, page: safePage, pageSize: psOut } =
+    invoiceQueries.listInvoicesPaged(db, p, ps);
+  return {
+    ok: true,
+    invoices: rows,
+    total,
+    page: safePage,
+    pageSize: psOut,
+  };
+});
+
+ipcMain.handle("invoices:getForPrint", async (_event, { id, orderId }) => {
+  if (!currentSession) {
+    return { ok: false, error: "Forbidden." };
+  }
+  const oid = Number(orderId);
+  if (oid) {
+    const row = invoiceQueries.getForPrintByOrderId(db, oid);
+    if (!row) {
+      return { ok: false, error: "Order not found." };
+    }
+    return { ok: true, invoice: row };
+  }
+  const iid = Number(id);
+  if (!iid) {
+    return { ok: false, error: "Invalid invoice." };
+  }
+  const row = invoiceQueries.getForPrint(db, iid);
+  if (!row) {
+    return { ok: false, error: "Invoice not found." };
+  }
+  return { ok: true, invoice: row };
+});
+
+ipcMain.handle("invoices:deleteAll", async () => {
+  if (!currentSession) {
+    return { ok: false, error: "Forbidden." };
+  }
+  invoiceQueries.deleteAll(db);
+  return { ok: true };
+});
+
+ipcMain.handle("orders:create", async (_event, payload) => {
+  if (!currentSession) {
+    return { ok: false, error: "Forbidden." };
   }
   const normalized = normalizeOrderLines(payload.lines);
   if (normalized.ok !== true) {
@@ -527,9 +580,11 @@ ipcMain.handle("orders:create", async (_event, payload) => {
   const customerCity = String(payload.customerCity || "").trim();
   const customerAddress = String(payload.customerAddress || "").trim();
   const note = String(payload.note || "").trim();
-  let status = normalizeOrderStatus(payload.status);
-  if (!sessionHasPermission("canChangeOrderStatus")) {
-    status = "pending";
+  const trackingId = String(payload.trackingId || "").trim();
+  const status = normalizeOrderStatus(payload.status);
+  const del = normalizeDeliveryCharges(payload.deliveryCharges);
+  if (del.ok !== true) {
+    return { ok: false, error: del.error };
   }
   const orderNumber = orderQueries.generateOrderNumber(db);
   const row = orderQueries.createOrderWithLines(db, {
@@ -542,37 +597,15 @@ ipcMain.handle("orders:create", async (_event, payload) => {
     note: note.slice(0, 2000),
     status,
     placedByUserId: currentSession.id,
+    deliveryCharges: del.value,
+    trackingId: trackingId.slice(0, 120),
   });
-  const adminEmails = userQueries.listAdminEmails(db);
-  let emailWarning = null;
-  if (adminEmails.length === 0) {
-    emailWarning = "No admin email on file; order was saved but not emailed.";
-  } else {
-    const appName = process.env.APP_NAME?.trim() || "App";
-    const mailRes = await sendEmail(
-      adminEmails.join(", "),
-      `${appName} — New order ${row.order_number}`,
-      "new-order",
-      {
-        appName,
-        order: row,
-        placedByUsername: currentSession.username,
-        placedByName: currentSession.name || currentSession.username,
-      },
-    );
-    if (!mailRes.success) {
-      emailWarning = mailRes.message || "Email could not be sent.";
-    }
-  }
-  return { ok: true, order: row, emailWarning };
+  return { ok: true, order: row };
 });
 
 ipcMain.handle("orders:update", async (_event, payload) => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };
-  }
-  if (!sessionHasPermission("canEditOrder")) {
-    return { ok: false, error: "You do not have permission to edit orders." };
   }
   const id = Number(payload.id);
   const existing = orderQueries.findById(db, id);
@@ -591,9 +624,11 @@ ipcMain.handle("orders:update", async (_event, payload) => {
   const customerCity = String(payload.customerCity || "").trim();
   const customerAddress = String(payload.customerAddress || "").trim();
   const note = String(payload.note || "").trim();
-  let status = normalizeOrderStatus(payload.status);
-  if (!sessionHasPermission("canChangeOrderStatus")) {
-    status = normalizeOrderStatus(existing.status);
+  const trackingId = String(payload.trackingId || "").trim();
+  const status = normalizeOrderStatus(payload.status);
+  const del = normalizeDeliveryCharges(payload.deliveryCharges);
+  if (del.ok !== true) {
+    return { ok: false, error: del.error };
   }
   const row = orderQueries.updateOrderWithLines(db, id, {
     lines: normalized.lines,
@@ -603,6 +638,9 @@ ipcMain.handle("orders:update", async (_event, payload) => {
     customerAddress: customerAddress.slice(0, 500),
     note: note.slice(0, 2000),
     status,
+    deliveryCharges: del.value,
+    trackingId: trackingId.slice(0, 120),
+    placedByUserId: existing.placed_by_user_id ?? currentSession.id,
   });
   return { ok: true, order: row };
 });
@@ -610,12 +648,6 @@ ipcMain.handle("orders:update", async (_event, payload) => {
 ipcMain.handle("orders:patchStatus", async (_event, { id, status }) => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };
-  }
-  if (!sessionHasPermission("canChangeOrderStatus")) {
-    return {
-      ok: false,
-      error: "You do not have permission to change order status.",
-    };
   }
   const oid = Number(id);
   if (!oid || !orderQueries.findById(db, oid)) {
@@ -629,9 +661,6 @@ ipcMain.handle("orders:delete", async (_event, { id }) => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };
   }
-  if (!sessionHasPermission("canDeleteOrder")) {
-    return { ok: false, error: "You do not have permission to delete orders." };
-  }
   const oid = Number(id);
   if (!oid || !orderQueries.findById(db, oid)) {
     return { ok: false, error: "Order not found." };
@@ -640,178 +669,13 @@ ipcMain.handle("orders:delete", async (_event, { id }) => {
   return { ok: true };
 });
 
-ipcMain.handle("users:sendAdminInviteCode", async () => {
-  if (!currentSession || currentSession.role !== "admin") {
-    return { ok: false, error: "Forbidden." };
-  }
-  if (!sessionHasPermission("canCreateUser")) {
-    return { ok: false, error: "You do not have permission to create users." };
-  }
-  const mail = normalizeEmail(currentSession.email);
-  if (!isValidEmail(mail)) {
-    return {
-      ok: false,
-      error:
-        "Your profile must have a valid email address to receive the verification code. Update your profile first.",
-    };
-  }
-  const code = generatePasswordResetCode();
-  const codeHash = hashPassword(code);
-  const expiresAt = Date.now() + 15 * 60 * 1000;
-  pendingAdminInviteByAdminId.set(currentSession.id, { codeHash, expiresAt });
-  const appName = process.env.APP_NAME?.trim() || "App";
-  const response = await sendEmail(
-    mail,
-    `${appName} — New admin verification`,
-    "admin-invite-code",
-    {
-      username: currentSession.username,
-      name:
-        (currentSession.name && String(currentSession.name).trim()) ||
-        currentSession.username,
-      code,
-      appName,
-    },
-  );
-  if (!response.success) {
-    pendingAdminInviteByAdminId.delete(currentSession.id);
-    return { ok: false, error: response.message };
-  }
-  return { ok: true };
-});
-
-ipcMain.handle(
-  "users:create",
-  async (_event, payload) => {
-    if (!currentSession || currentSession.role !== "admin") {
-      return { ok: false, error: "Forbidden." };
-    }
-    if (!sessionHasPermission("canCreateUser")) {
-      return { ok: false, error: "You do not have permission to create users." };
-    }
-    const username = payload?.username;
-    const password = payload?.password;
-    const role = payload?.role;
-    const name = payload?.name;
-    const email = payload?.email;
-    const u = String(username || "").trim();
-    if (!u || !password) {
-      return { ok: false, error: "Username and password are required." };
-    }
-    const displayName = normalizePersonName(name);
-    const mail = normalizeEmail(email);
-    if (!isValidEmail(mail)) {
-      return { ok: false, error: "A valid email address is required." };
-    }
-    if (role !== "admin" && role !== "user") {
-      return { ok: false, error: "Role must be admin or user." };
-    }
-    if (userQueries.findByUsername(db, u)) {
-      return { ok: false, error: "Username already exists." };
-    }
-    if (role === "admin") {
-      const rawCode = String(payload?.adminInviteCode || "").trim();
-      const pending = pendingAdminInviteByAdminId.get(currentSession.id);
-      if (!pending || Date.now() > pending.expiresAt) {
-        return {
-          ok: false,
-          error:
-            "Creating an admin requires a verification code. Tap “Send code to my email”, then enter the code from your inbox.",
-          needsAdminCode: true,
-        };
-      }
-      if (!rawCode || !verifyPassword(rawCode, pending.codeHash)) {
-        return {
-          ok: false,
-          error: "Invalid verification code. Check the email sent to your account and try again.",
-          needsAdminCode: true,
-        };
-      }
-      pendingAdminInviteByAdminId.delete(currentSession.id);
-    }
-    const passwordHash = hashPassword(password);
-    const newId = userQueries.createUser(
-      db,
-      u,
-      passwordHash,
-      role,
-      displayName,
-      mail,
-    );
-    userQueries.seedPermissionsForNewUser(db, newId, role);
-    pendingAdminInviteByAdminId.delete(currentSession.id);
-    return { ok: true };
-  },
-);
-
-ipcMain.handle("users:getPermissions", async (_event, { id }) => {
-  if (!currentSession || currentSession.role !== "admin") {
-    return { ok: false, error: "Forbidden." };
-  }
-  if (!sessionHasPermission("canEditUser")) {
-    return {
-      ok: false,
-      error: "You do not have permission to view or edit user settings.",
-    };
-  }
-  const targetId = Number(id);
-  if (!targetId) {
-    return { ok: false, error: "Invalid user." };
-  }
-  const row = userQueries.findById(db, targetId);
-  if (!row) {
-    return { ok: false, error: "User not found." };
-  }
-  const permissions = userQueries.getUserPermissionsForApi(db, targetId);
-  return {
-    ok: true,
-    username: row.username,
-    role: row.role,
-    permissions,
-  };
-});
-
-ipcMain.handle("users:updatePermissions", async (_event, payload) => {
-  if (!currentSession || currentSession.role !== "admin") {
-    return { ok: false, error: "Forbidden." };
-  }
-  if (!sessionHasPermission("canEditUser")) {
-    return {
-      ok: false,
-      error: "You do not have permission to update user settings.",
-    };
-  }
-  const targetId = Number(payload?.id);
-  if (!targetId) {
-    return { ok: false, error: "Invalid user." };
-  }
-  if (!userQueries.findById(db, targetId)) {
-    return { ok: false, error: "User not found." };
-  }
-  const previous = userQueries.getUserPermissionsForApi(db, targetId);
-  const merged = mergePermissionPayloadFromClient(previous, payload?.permissions);
-  userQueries.upsertUserPermissionsFromApi(db, targetId, merged);
-  return { ok: true };
-});
-
-ipcMain.handle("users:update", async (_event, { id, name, email }) => {
+ipcMain.handle("users:update", async (_event, { id, name, email, username }) => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };
   }
   const targetId = Number(id);
-  if (!targetId) {
-    return { ok: false, error: "Invalid user." };
-  }
-  const isAdmin = currentSession.role === "admin";
-  const isSelf = targetId === currentSession.id;
-  if (!isAdmin && !isSelf) {
+  if (!targetId || targetId !== currentSession.id) {
     return { ok: false, error: "Forbidden." };
-  }
-  if (!isSelf && isAdmin && !sessionHasPermission("canEditUser")) {
-    return {
-      ok: false,
-      error: "You do not have permission to edit other users.",
-    };
   }
   const row = userQueries.findById(db, targetId);
   if (!row) {
@@ -822,29 +686,23 @@ ipcMain.handle("users:update", async (_event, { id, name, email }) => {
   if (!isValidEmail(mail)) {
     return { ok: false, error: "A valid email address is required." };
   }
-  userQueries.updateUserContact(db, targetId, displayName, mail);
-  if (currentSession.id === targetId) {
-    currentSession = {
-      ...currentSession,
-      name: displayName,
-      email: mail,
-    };
+  const u = String(username ?? row.username ?? "")
+    .trim()
+    .slice(0, 80);
+  if (!u) {
+    return { ok: false, error: "Username is required." };
   }
-  return { ok: true };
-});
-
-ipcMain.handle("users:delete", async (_event, { id }) => {
-  if (!currentSession || currentSession.role !== "admin") {
-    return { ok: false, error: "Forbidden." };
+  const existing = userQueries.findByUsername(db, u);
+  if (existing && existing.id !== targetId) {
+    return { ok: false, error: "That username is already in use." };
   }
-  if (!sessionHasPermission("canDeleteUser")) {
-    return { ok: false, error: "You do not have permission to delete users." };
-  }
-  const targetId = Number(id);
-  if (!targetId || targetId === currentSession.id) {
-    return { ok: false, error: "Cannot remove yourself or invalid user." };
-  }
-  userQueries.deleteUser(db, targetId);
+  userQueries.updateUserProfile(db, targetId, displayName, mail, u);
+  currentSession = {
+    ...currentSession,
+    username: u,
+    name: displayName,
+    email: mail,
+  };
   return { ok: true };
 });
 

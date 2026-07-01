@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getApi } from '../../api';
-import { RelativeTime } from '../../RelativeTime';
-import { FaIcon } from '../FaIcon';
+import { getApi } from '../api';
+import { RelativeTime } from '../RelativeTime';
+import { FaIcon } from '../components/FaIcon';
+import { notifyError, notifySuccess } from '../lib/notify';
+import {
+  getStoredPageSize,
+  PAGE_SIZE_OPTIONS,
+  setStoredPageSize,
+} from '../lib/pageSize';
 
 const pkr = new Intl.NumberFormat('en-PK', {
   style: 'currency',
@@ -16,10 +22,9 @@ function formatWeightG(g) {
   return `${n.toFixed(2)} g`;
 }
 
-/** @param {{ permissions: ReturnType<typeof import('../../permissions').mergePermissions> }} props */
-export function ProductsModule({ permissions }) {
+function Products() {
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(() => getStoredPageSize());
   const [total, setTotal] = useState(0);
   const [products, setProducts] = useState([]);
   const [listError, setListError] = useState('');
@@ -55,6 +60,7 @@ export function ProductsModule({ permissions }) {
       return true;
     }
     setListError(res.error || 'Could not load products.');
+    notifyError(res.error || 'Could not load products.');
     return false;
   }, [filterSearch]);
 
@@ -88,7 +94,6 @@ export function ProductsModule({ permissions }) {
   }, [modalOpen]);
 
   function openCreate() {
-    if (!permissions.canCreateProduct) return;
     setEditingId(null);
     setFormName('');
     setFormWeight('');
@@ -98,7 +103,6 @@ export function ProductsModule({ permissions }) {
   }
 
   function openEdit(p) {
-    if (!permissions.canEditProduct) return;
     setEditingId(p.id);
     setFormName(p.name || '');
     setFormWeight(String(p.weight_g ?? ''));
@@ -137,18 +141,21 @@ export function ProductsModule({ permissions }) {
     if (!wasEdit) {
       setPage(1);
     }
+    notifySuccess(wasEdit ? 'Product updated.' : 'Product added.');
     await loadList(listPage, pageSize);
   }
 
   async function handleDelete(p) {
-    if (!permissions.canRemoveProduct) return;
     if (!window.confirm(`Delete product “${p.name}”?`)) return;
     setListError('');
     const res = await getApi().deleteProduct({ id: p.id });
     if (!res.ok) {
-      setListError(res.error || 'Delete failed.');
+      const err = res.error || 'Delete failed.';
+      setListError(err);
+      notifyError(err);
       return;
     }
+    notifySuccess('Product deleted.');
     await loadList(page, pageSize);
   }
 
@@ -172,22 +179,20 @@ export function ProductsModule({ permissions }) {
             to add a product.
           </p>
         </div>
-        {permissions.canCreateProduct ? (
-          <button
-            type="button"
-            className="fab-plus"
-            aria-label="Add product"
-            onClick={openCreate}
-          >
-            <FaIcon icon="plus" className="fab-plus-fa" />
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="fab-plus"
+          aria-label="Add product"
+          onClick={openCreate}
+        >
+          <FaIcon icon="plus" className="fab-plus-fa" />
+        </button>
       </div>
 
       {listError ? (
-        <div className="alert alert-error" role="alert">
-          {listError}
-        </div>
+        <p className="empty-hint" role="alert">
+          Could not load the list. Try refreshing or check your connection.
+        </p>
       ) : null}
 
       <div className="card">
@@ -198,15 +203,18 @@ export function ProductsModule({ permissions }) {
             <select
               value={pageSize}
               onChange={(e) => {
+                const next = Number(e.target.value);
                 setPage(1);
-                setPageSize(Number(e.target.value));
+                setPageSize(next);
+                setStoredPageSize(next);
               }}
               aria-label="Rows per page"
             >
-              <option value={5}>5</option>
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -268,13 +276,11 @@ export function ProductsModule({ permissions }) {
                       <RelativeTime value={p.created_at} />
                     </td>
                     <td className="table-actions">
-                      {permissions.canEditProduct || permissions.canRemoveProduct ? (
                         <div
                           className="table-action-group"
                           role="group"
                           aria-label="Product actions"
                         >
-                          {permissions.canEditProduct ? (
                             <button
                               type="button"
                               className="btn btn-ghost btn-sm table-action-icon-btn"
@@ -283,8 +289,6 @@ export function ProductsModule({ permissions }) {
                             >
                               <FaIcon icon="pen-to-square" />
                             </button>
-                          ) : null}
-                          {permissions.canRemoveProduct ? (
                             <button
                               type="button"
                               className="btn btn-danger btn-sm table-action-icon-btn"
@@ -293,11 +297,7 @@ export function ProductsModule({ permissions }) {
                             >
                               <FaIcon icon="trash-can" />
                             </button>
-                          ) : null}
                         </div>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
                     </td>
                   </tr>
                 ))}
@@ -415,3 +415,5 @@ export function ProductsModule({ permissions }) {
     </div>
   );
 }
+
+export default Products;

@@ -1,0 +1,74 @@
+/* Themed React Toastify — uses :root tokens from index.css */
+
+.Toastify__toast-container {
+  width: min(380px, calc(100vw - 24px));
+  padding: 12px;
+}
+
+.Toastify__toast.app-toast {
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+  color: var(--text);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  min-height: unset;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.Toastify__toast--success.app-toast {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--success) 28%, transparent),
+    0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.Toastify__toast--error.app-toast {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--danger) 28%, transparent),
+    0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.Toastify__toast--info.app-toast {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.Toastify__toast.app-toast .Toastify__toast-body {
+  padding: 0;
+}
+
+.Toastify__toast .Toastify__progress-bar {
+  height: 3px;
+}
+
+.Toastify__toast--success .Toastify__progress-bar {
+  background: linear-gradient(90deg, #22c55e, var(--success));
+}
+
+.Toastify__toast--error .Toastify__progress-bar {
+  background: linear-gradient(90deg, #ef4444, var(--danger));
+}
+
+.Toastify__toast--default .Toastify__progress-bar,
+.Toastify__toast--info .Toastify__progress-bar {
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+}
+
+.Toastify__close-button {
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+
+.Toastify__close-button:hover,
+.Toastify__close-button:focus {
+  color: var(--text);
+  opacity: 1;
+}

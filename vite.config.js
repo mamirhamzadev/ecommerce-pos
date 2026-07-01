@@ -2,7 +2,8 @@ const path = require('path');
 const { defineConfig, loadEnv } = require('vite');
 const react = require('@vitejs/plugin-react');
 
-module.exports = defineConfig(({ mode }) => {
+module.exports = defineConfig(async ({ mode }) => {
+  const { default: tailwindcss } = await import('@tailwindcss/vite');
   const env = loadEnv(mode, __dirname, '');
   const appName = (env.APP_NAME || 'App').trim() || 'App';
 
@@ -12,7 +13,7 @@ module.exports = defineConfig(({ mode }) => {
     define: {
       'import.meta.env.VITE_APP_NAME': JSON.stringify(appName),
     },
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
     build: {
       outDir: path.join(__dirname, 'dist', 'renderer'),
       emptyOutDir: true,

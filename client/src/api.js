@@ -1,23 +1,23 @@
 /** @param {Window['api']} raw */
 function wrapApi(raw) {
-  const needsUserPatch = typeof raw.updateUser !== 'function';
+  const needsInvoicesPatch = typeof raw.listInvoicesPaged !== 'function';
+  const needsInvoicePrintPatch = typeof raw.getInvoiceForPrint !== 'function';
+  const needsDeleteAllInvoicesPatch = typeof raw.deleteAllInvoices !== 'function';
   const needsPickerPatch = typeof raw.listProductsPicker !== 'function';
   const needsPasswordPatch = typeof raw.changePassword !== 'function';
-  const needsAdminCodePatch = typeof raw.sendAdminInviteCode !== 'function';
-  const needsPermPatch =
-    typeof raw.getUserPermissions !== 'function' ||
-    typeof raw.updateUserPermissions !== 'function';
+  const needsUserPatch = typeof raw.updateUser !== 'function';
   const needsUpdaterPatch =
     typeof raw.getUpdaterInfo !== 'function' ||
     typeof raw.checkAppUpdates !== 'function' ||
     typeof raw.quitAndInstallUpdate !== 'function' ||
     typeof raw.onUpdaterEvent !== 'function';
   if (
-    !needsUserPatch &&
+    !needsInvoicesPatch &&
+    !needsInvoicePrintPatch &&
+    !needsDeleteAllInvoicesPatch &&
     !needsPickerPatch &&
     !needsPasswordPatch &&
-    !needsAdminCodePatch &&
-    !needsPermPatch &&
+    !needsUserPatch &&
     !needsUpdaterPatch
   ) {
     return raw;
@@ -25,6 +25,21 @@ function wrapApi(raw) {
   if (typeof raw.invoke === 'function') {
     return {
       ...raw,
+      ...(needsInvoicesPatch
+        ? {
+            listInvoicesPaged: (payload) => raw.invoke('invoices:listPaged', payload),
+          }
+        : {}),
+      ...(needsInvoicePrintPatch
+        ? {
+            getInvoiceForPrint: (payload) => raw.invoke('invoices:getForPrint', payload),
+          }
+        : {}),
+      ...(needsDeleteAllInvoicesPatch
+        ? {
+            deleteAllInvoices: () => raw.invoke('invoices:deleteAll'),
+          }
+        : {}),
       ...(needsUserPatch
         ? {
             updateUser: (payload) => raw.invoke('users:update', payload),
@@ -38,19 +53,6 @@ function wrapApi(raw) {
       ...(needsPasswordPatch
         ? {
             changePassword: (payload) => raw.invoke('auth:changePassword', payload),
-          }
-        : {}),
-      ...(needsAdminCodePatch
-        ? {
-            sendAdminInviteCode: () => raw.invoke('users:sendAdminInviteCode'),
-          }
-        : {}),
-      ...(needsPermPatch
-        ? {
-            getUserPermissions: (payload) =>
-              raw.invoke('users:getPermissions', payload),
-            updateUserPermissions: (payload) =>
-              raw.invoke('users:updatePermissions', payload),
           }
         : {}),
       ...(needsUpdaterPatch
@@ -68,12 +70,42 @@ function wrapApi(raw) {
   }
   return {
     ...raw,
+    ...(needsInvoicesPatch
+      ? {
+          listInvoicesPaged: () =>
+            Promise.reject(
+              new Error(
+                'Invoices list requires a full app restart after updating preload.',
+              ),
+            ),
+        }
+      : {}),
+    ...(needsInvoicePrintPatch
+      ? {
+          getInvoiceForPrint: () =>
+            Promise.reject(
+              new Error(
+                'Invoice print requires a full app restart after updating preload.',
+              ),
+            ),
+        }
+      : {}),
+    ...(needsDeleteAllInvoicesPatch
+      ? {
+          deleteAllInvoices: () =>
+            Promise.reject(
+              new Error(
+                'Delete all invoices requires a full app restart after updating preload.',
+              ),
+            ),
+        }
+      : {}),
     ...(needsUserPatch
       ? {
           updateUser: () =>
             Promise.reject(
               new Error(
-                'Contact update requires a newer app build. Quit every Electron window, stop the dev server (Ctrl+C), then run npm run dev again.',
+                'Profile update requires a newer app build. Quit every Electron window, stop the dev server (Ctrl+C), then run npm run dev again.',
               ),
             ),
         }
@@ -94,32 +126,6 @@ function wrapApi(raw) {
             Promise.reject(
               new Error(
                 'Change password requires a newer app build. Restart the app after updating preload.',
-              ),
-            ),
-        }
-      : {}),
-    ...(needsAdminCodePatch
-      ? {
-          sendAdminInviteCode: () =>
-            Promise.reject(
-              new Error(
-                'Admin verification requires a newer app build. Restart the app after updating preload.',
-              ),
-            ),
-        }
-      : {}),
-    ...(needsPermPatch
-      ? {
-          getUserPermissions: () =>
-            Promise.reject(
-              new Error(
-                'User permissions require a newer app build. Restart the app after updating preload.',
-              ),
-            ),
-          updateUserPermissions: () =>
-            Promise.reject(
-              new Error(
-                'User permissions require a newer app build. Restart the app after updating preload.',
               ),
             ),
         }

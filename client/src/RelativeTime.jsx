@@ -13,7 +13,7 @@ dayjs.extend(updateLocale);
  * treats that string as local wall time, which skews `fromNow()` by the
  * machine's offset from UTC (e.g. ~5 hours in Pakistan).
  */
-function parseDbTimestamp(iso) {
+export function parseDbTimestamp(iso) {
   if (iso == null || iso === '') return null;
   const s = String(iso).trim();
   if (!s) return null;

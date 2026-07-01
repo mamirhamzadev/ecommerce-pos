@@ -15,26 +15,40 @@ type UpdaterUpdateInfo = {
   path: string;
 };
 
-type UserPermissions = {
-  canCreateProduct: boolean;
-  canEditProduct: boolean;
-  canRemoveProduct: boolean;
-  canCreateOrder: boolean;
-  canDeleteOrder: boolean;
-  canEditOrder: boolean;
-  canChangeOrderStatus: boolean;
-  canCreateUser: boolean;
-  canEditUser: boolean;
-  canDeleteUser: boolean;
-};
-
 type UserPublic = {
   id: number;
   username: string;
   name: string;
   email: string;
   role: string;
-  permissions?: UserPermissions;
+};
+
+export type InvoiceForPrint = {
+  id: number;
+  invoice_number: string;
+  amount: number;
+  status: string;
+  order_id: number | null;
+  user_id: number | null;
+  created_at: string;
+  order_number: string | null;
+  customer_name: string | null;
+  customer_contact: string | null;
+  customer_city: string | null;
+  customer_address: string | null;
+  note: string | null;
+  delivery_charges: number | null;
+  tracking_id: string | null;
+  order_status: string | null;
+  issued_by_username: string | null;
+  issued_by_name: string | null;
+  items: Array<{
+    product_name: string;
+    qty: number;
+    weight_g: number;
+    unit_price: number;
+    line_total: number;
+  }>;
 };
 
 type DashboardSnapshotSuccess = {
@@ -45,6 +59,8 @@ type DashboardSnapshotSuccess = {
     orders: number;
     invoices: number;
     ordersOpen: number;
+    ordersDelivered: number;
+    ordersCancelled: number;
     invoicesUnpaid: number;
   };
   recentOrders: Array<{
@@ -57,17 +73,12 @@ type DashboardSnapshotSuccess = {
     created_at: string;
     placed_by_username: string | null;
   }>;
-  recentLogins: Array<{
-    logged_in_at: string;
-    user_id: number;
-    username: string;
-    name: string;
-  }>;
-  recentSignups: Array<{
+  recentProducts: Array<{
     id: number;
-    username: string;
     name: string;
-    role: string;
+    sku: string;
+    price: number;
+    weight_g: number;
     created_at: string;
   }>;
 };
@@ -83,14 +94,7 @@ declare global {
           | 'auth:changePassword'
           | 'auth:logout'
           | 'auth:session'
-          | 'users:list'
-          | 'users:listPaged'
-          | 'users:create'
-          | 'users:sendAdminInviteCode'
           | 'users:update'
-          | 'users:delete'
-          | 'users:getPermissions'
-          | 'users:updatePermissions'
           | 'dashboard:snapshot'
           | 'products:listPaged'
           | 'products:listPicker'
@@ -102,13 +106,16 @@ declare global {
           | 'orders:update'
           | 'orders:patchStatus'
           | 'orders:delete'
+          | 'invoices:listPaged'
+          | 'invoices:getForPrint'
+          | 'invoices:deleteAll'
           | 'app:updaterInfo'
           | 'app:updaterCheck'
           | 'app:updaterQuitAndInstall',
         payload?: unknown,
       ) => Promise<unknown>;
       login: (payload: { username: string; password: string }) => Promise<
-        | { ok: true; token: string; user: UserPublic & { permissions: UserPermissions } }
+        | { ok: true; token: string; user: UserPublic }
         | { ok: false; error?: string }
       >;
       forgotRequest: (payload: { username: string }) => Promise<
@@ -128,81 +135,15 @@ declare global {
       }) => Promise<{ ok: true } | { ok: false; error?: string }>;
       logout: (token: string | null) => Promise<{ ok: boolean }>;
       getSession: (token: string | null) => Promise<
-        | { ok: true; user: UserPublic & { permissions: UserPermissions } }
+        | { ok: true; user: UserPublic }
         | { ok: false }
       >;
-      listUsers: () => Promise<
-        | {
-            ok: true;
-            users: Array<{
-              id: number;
-              username: string;
-              name: string;
-              email: string;
-              role: string;
-              created_at: string;
-            }>;
-          }
-        | { ok: false; error?: string }
-      >;
-      listUsersPaged: (payload: {
-        page: number;
-        pageSize: number;
-        /** Omit or `'all'` for every role */
-        role?: string;
-        /** Substring match on name, username, or email; exact match on internal id */
-        q?: string;
-      }) => Promise<
-        | {
-            ok: true;
-            users: Array<{
-              id: number;
-              username: string;
-              name: string;
-              email: string;
-              role: string;
-              created_at: string;
-            }>;
-            total: number;
-            page: number;
-            pageSize: number;
-          }
-        | { ok: false; error?: string }
-      >;
-      createUser: (payload: {
-        username: string;
-        password: string;
-        role: string;
-        name?: string;
-        email: string;
-        /** Required when role is `admin` — code from the logged-in admin’s email */
-        adminInviteCode?: string;
-      }) => Promise<
-        | { ok: true }
-        | { ok: false; error?: string; needsAdminCode?: boolean }
-      >;
-      sendAdminInviteCode: () => Promise<{ ok: true } | { ok: false; error?: string }>;
       updateUser: (payload: {
         id: number;
         name?: string;
         email: string;
+        username: string;
       }) => Promise<{ ok: boolean; error?: string }>;
-      deleteUser: (payload: { id: number }) => Promise<{ ok: boolean; error?: string }>;
-      getUserPermissions: (payload: {
-        id: number;
-      }) => Promise<
-        | {
-            ok: true;
-            username: string;
-            role: string;
-            permissions: UserPermissions;
-          }
-        | { ok: false; error?: string }
-      >;
-      updateUserPermissions: (payload: {
-        id: number;
-        permissions: Partial<UserPermissions>;
-      }) => Promise<{ ok: true } | { ok: false; error?: string }>;
       getDashboardSnapshot: () => Promise<DashboardSnapshotSuccess | { ok: false; error?: string }>;
       listProductsPicker: (payload: {
         search?: string;
@@ -276,6 +217,8 @@ declare global {
               created_at: string;
               placed_by_user_id: number | null;
               placed_by_username: string | null;
+              delivery_charges: number;
+              tracking_id: string;
               items: Array<{
                 id: number;
                 order_id: number;
@@ -308,10 +251,9 @@ declare global {
         customerAddress: string;
         note: string;
         status: string;
-      }) => Promise<
-        | { ok: true; order: unknown; emailWarning?: string | null }
-        | { ok: false; error?: string }
-      >;
+        deliveryCharges: number;
+        trackingId?: string;
+      }) => Promise<{ ok: true; order: unknown } | { ok: false; error?: string }>;
       updateOrder: (payload: {
         id: number;
         lines: Array<{
@@ -327,12 +269,45 @@ declare global {
         customerAddress: string;
         note: string;
         status: string;
+        deliveryCharges: number;
+        trackingId?: string;
       }) => Promise<{ ok: true; order: unknown } | { ok: false; error?: string }>;
       patchOrderStatus: (payload: {
         id: number;
         status: string;
       }) => Promise<{ ok: true } | { ok: false; error?: string }>;
       deleteOrder: (payload: { id: number }) => Promise<{ ok: true } | { ok: false; error?: string }>;
+      listInvoicesPaged: (payload: {
+        page: number;
+        pageSize: number;
+      }) => Promise<
+        | {
+            ok: true;
+            invoices: Array<{
+              id: number;
+              invoice_number: string;
+              amount: number;
+              status: string;
+              order_id: number | null;
+              user_id: number | null;
+              created_at: string;
+              order_number: string | null;
+              user_username: string | null;
+            }>;
+            total: number;
+            page: number;
+            pageSize: number;
+          }
+        | { ok: false; error?: string }
+      >;
+      getInvoiceForPrint: (payload: { id?: number; orderId?: number }) => Promise<
+        | {
+            ok: true;
+            invoice: InvoiceForPrint;
+          }
+        | { ok: false; error?: string }
+      >;
+      deleteAllInvoices: () => Promise<{ ok: true } | { ok: false; error?: string }>;
       getUpdaterInfo: () => Promise<
         | { ok: true; isPackaged: boolean; currentVersion: string }
         | { ok: false; error?: string }
