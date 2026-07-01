@@ -1,3 +1,4 @@
+import { QRCodeSVG } from 'qrcode.react';
 import { APP_NAME } from '../appName';
 import { parseDbTimestamp } from '../RelativeTime';
 import '../invoice-print.css';
@@ -41,6 +42,17 @@ function formatInvoiceTime(iso) {
   const d = parseDbTimestamp(iso);
   if (!d || !d.isValid()) return '';
   return d.local().format('hh:mm A');
+}
+
+/** QR payload: orderNo on first line; trackingId on second when present. */
+function buildInvoiceQrPayload(orderNo, trackingId) {
+  const order = String(orderNo || '').trim();
+  if (!order) return '';
+  const tracking = String(trackingId || '').trim();
+  if (tracking) {
+    return `${order}\n${tracking}`;
+  }
+  return order;
 }
 
 function statusLabel(status) {
@@ -140,6 +152,8 @@ export function InvoicePrintView({ invoice }) {
   const issuedTime = formatInvoiceTime(invoice.created_at);
   const note = String(invoice.note || '').trim();
   const trackingId = String(invoice.tracking_id || '').trim();
+  const orderNo = String(invoice.order_number || '').trim();
+  const qrPayload = buildInvoiceQrPayload(orderNo, trackingId);
 
   return (
     <div className="invoice-print-root" aria-hidden="true">
@@ -155,7 +169,7 @@ export function InvoicePrintView({ invoice }) {
                 <p className="invoice-brand-tagline">Sales Invoice</p>
               </div>
             </div>
-            <div className="invoice-title-block">
+            <div className={`invoice-title-block${qrPayload ? ' invoice-title-block-has-qr' : ''}`}>
               <p className="invoice-doc-label">Tax Invoice</p>
               <h1 className="invoice-number">{invoice.invoice_number}</h1>
               <span
@@ -163,6 +177,18 @@ export function InvoicePrintView({ invoice }) {
               >
                 {invoiceStatus}
               </span>
+              {qrPayload ? (
+                <div className="invoice-qr-wrap" aria-hidden="true">
+                  <QRCodeSVG
+                    value={qrPayload}
+                    size={68}
+                    level="M"
+                    marginSize={0}
+                    bgColor="#ffffff"
+                    fgColor="#0f172a"
+                  />
+                </div>
+              ) : null}
             </div>
           </header>
 
