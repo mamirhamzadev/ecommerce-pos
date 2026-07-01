@@ -257,6 +257,104 @@ html {
   line-height: 1;
 }
 
+.sidebar-update {
+  padding: 10px 12px 12px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-update-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.sidebar-update-icon {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.sidebar-update-version {
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.sidebar-update-status {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.sidebar-update-status--ready {
+  color: var(--accent);
+}
+
+.sidebar-update-hint {
+  margin: 6px 0 0;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.sidebar-update-error {
+  margin: 6px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #fca5a5;
+}
+
+.sidebar-update-download {
+  margin-top: 2px;
+}
+
+.sidebar-update-progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 6px;
+  border: none;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  accent-color: var(--accent);
+}
+
+.sidebar-update-ready {
+  margin-top: 2px;
+}
+
+.sidebar-update-install-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.25);
+}
+
+.sidebar-update-install-btn:hover {
+  background: rgba(56, 189, 248, 0.2);
+  color: #e0f2fe;
+}
+
 .sidebar-link-logout {
   color: var(--danger);
 }

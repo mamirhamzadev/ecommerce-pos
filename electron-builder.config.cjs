@@ -23,6 +23,8 @@ module.exports = {
   },
   files: ["dist/**/*", "main.js", "preload.js", "src/**/*", "package.json"],
   asarUnpack: ["**/*.node"],
+  /** Packaged app reads GITHUB_TOKEN / GITHUB_RELEASE_REPO from resources/.env */
+  extraResources: [{ from: ".env", to: ".env" }],
   win: {
     target: [{ target: "nsis", arch: ["x64"] }],
     /** Avoid winCodeSign extraction (symlinks) on machines without Developer Mode / admin symlink rights */

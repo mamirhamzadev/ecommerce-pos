@@ -5,6 +5,7 @@ import { getApi } from '../api';
 import { APP_NAME } from '../appName';
 import { FaIcon } from '../components/FaIcon';
 import { ProfileMenu } from '../components/dashboard/ProfileMenu';
+import { SidebarUpdate } from '../components/dashboard/SidebarUpdate';
 import { clearUser, setUser } from '../redux/actions/user';
 import { AUTH_TOKEN_KEY, getStoredAuthToken } from '../session';
 
@@ -164,6 +165,7 @@ export function Dashboard() {
             </NavLink>
           </nav>
           <div className="sidebar-footer">
+            <SidebarUpdate />
             <button
               type="button"
               className="sidebar-link sidebar-link-logout"

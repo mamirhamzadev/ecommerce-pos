@@ -4,7 +4,7 @@ const {
   parseGithubReleaseRepoInput,
   parseGithubReleaseRepoFromPackageJsonPath,
 } = require("./githubReleaseRepo");
-require("dotenv").config();
+const { loadEnvFiles } = require("./loadEnv");
 
 let updateDownloaded = false;
 
@@ -43,20 +43,42 @@ function broadcast(getMainWindow, payload) {
   }
 }
 
-/**
- * @param {object} opts
- * @param {import("electron").App} opts.app
- * @param {() => import("electron").BrowserWindow | null | undefined} opts.getMainWindow
- */
-function wireAutoUpdater(opts) {
-  const { app, getMainWindow } = opts;
-
+function resolveGithubToken() {
   const token =
-    process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
+    process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
   if (token && !process.env.GH_TOKEN) {
     process.env.GH_TOKEN = token;
   }
+  return token;
+}
 
+function resolveReleasePrivate(token) {
+  const raw = process.env.GITHUB_RELEASE_PRIVATE?.trim().toLowerCase();
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
+  if (raw === "false" || raw === "0" || raw === "no") return false;
+  return Boolean(token);
+}
+
+/** User-facing hint when GitHub returns 404 (private repo / bad token / no releases). */
+function friendlyUpdaterError(message, gh, hasToken) {
+  const m = String(message || "");
+  if (!/404|authentication token|not reported/i.test(m)) return m;
+  const repoLabel = gh ? `${gh.owner}/${gh.repo}` : "the configured GitHub repo";
+  if (!hasToken) {
+    return `Cannot reach ${repoLabel} releases. Add GITHUB_TOKEN (with repo read access) to .env, rebuild with npm run dist, or place .env next to the installed app.`;
+  }
+  return `Cannot reach ${repoLabel} releases. Check that GITHUB_TOKEN is valid, has repo access, and that a GitHub Release exists for this app.`;
+}
+
+/**
+ * @param {object} opts
+ * @param {import("electron").App} opts.app
+ */
+function getUpdaterConfig(opts) {
+  const { app } = opts;
+  loadEnvFiles(app);
+
+  const token = resolveGithubToken();
   const fromEnv = parseGithubReleaseRepoInput(
     process.env.GITHUB_RELEASE_REPO?.trim(),
   );
@@ -64,13 +86,30 @@ function wireAutoUpdater(opts) {
   const fromPkg = parseGithubReleaseRepoFromPackageJsonPath(pkgPath);
   /** Installed app: prefer committed `repository` so updates match the real release repo. Dev: `.env` overrides. */
   const gh = app.isPackaged ? fromPkg || fromEnv : fromEnv || fromPkg;
+
+  return {
+    gh,
+    token,
+    isPrivate: resolveReleasePrivate(token),
+  };
+}
+
+/**
+ * @param {object} opts
+ * @param {import("electron").App} opts.app
+ * @param {() => import("electron").BrowserWindow | null | undefined} opts.getMainWindow
+ */
+function wireAutoUpdater(opts) {
+  const { app, getMainWindow } = opts;
+  const { gh, token, isPrivate } = getUpdaterConfig({ app });
+
   if (gh) {
     autoUpdater.setFeedURL({
       provider: "github",
       owner: gh.owner,
       repo: gh.repo,
-      private: true,
-      token: process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim(),
+      private: isPrivate,
+      ...(token ? { token } : {}),
     });
   }
 
@@ -94,9 +133,10 @@ function wireAutoUpdater(opts) {
     });
   });
   autoUpdater.on("error", (err) => {
+    const raw = err instanceof Error ? err.message : String(err);
     broadcast(getMainWindow, {
       type: "error",
-      message: err instanceof Error ? err.message : String(err),
+      message: friendlyUpdaterError(raw, gh, Boolean(token)),
     });
   });
   autoUpdater.on("download-progress", (p) => {
@@ -120,22 +160,20 @@ function wireAutoUpdater(opts) {
 /**
  * @param {import("electron").IpcMain} ipcMain
  * @param {import("electron").App} app
- * @param {{ getMainWindow: () => import("electron").BrowserWindow | null | undefined, getIsAdmin: () => boolean }} auth
  */
-function registerUpdaterIpc(ipcMain, app, auth) {
-  const { getMainWindow, getIsAdmin } = auth;
-
+function registerUpdaterIpc(ipcMain, app) {
   ipcMain.handle("app:updaterInfo", async () => {
-    if (!getIsAdmin()) return { ok: false, error: "Forbidden." };
+    const { gh, token } = getUpdaterConfig({ app });
     return {
       ok: true,
       isPackaged: app.isPackaged,
       currentVersion: app.getVersion(),
+      releaseRepo: gh ? `${gh.owner}/${gh.repo}` : null,
+      hasGithubToken: Boolean(token),
     };
   });
 
   ipcMain.handle("app:updaterCheck", async () => {
-    if (!getIsAdmin()) return { ok: false, error: "Forbidden." };
     if (!app.isPackaged) {
       return {
         ok: true,
@@ -157,16 +195,17 @@ function registerUpdaterIpc(ipcMain, app, auth) {
           : null,
       };
     } catch (e) {
+      const { gh, token } = getUpdaterConfig({ app });
+      const raw = e instanceof Error ? e.message : String(e);
       return {
         ok: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: friendlyUpdaterError(raw, gh, Boolean(token)),
         currentVersion: app.getVersion(),
       };
     }
   });
 
   ipcMain.handle("app:updaterQuitAndInstall", async () => {
-    if (!getIsAdmin()) return { ok: false, error: "Forbidden." };
     if (!app.isPackaged) {
       return { ok: false, error: "Not available in development." };
     }
@@ -189,14 +228,10 @@ function registerUpdaterIpc(ipcMain, app, auth) {
  * @param {import("electron").App} opts.app
  * @param {import("electron").IpcMain} opts.ipcMain
  * @param {() => import("electron").BrowserWindow | null | undefined} opts.getMainWindow
- * @param {() => boolean} opts.getIsAdmin
  */
 function registerAppUpdater(opts) {
   wireAutoUpdater({ app: opts.app, getMainWindow: opts.getMainWindow });
-  registerUpdaterIpc(opts.ipcMain, opts.app, {
-    getMainWindow: opts.getMainWindow,
-    getIsAdmin: opts.getIsAdmin,
-  });
+  registerUpdaterIpc(opts.ipcMain, opts.app);
 }
 
 module.exports = { registerAppUpdater };

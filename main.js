@@ -1,7 +1,9 @@
 const path = require("path");
 const fs = require("fs");
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+const { loadEnvFiles } = require("./src/loadEnv");
 const { app, BrowserWindow, ipcMain, protocol, dialog } = require("electron");
+
+loadEnvFiles();
 
 /** Prevent a second process from opening the same SQLite DB (would hang IPC / session restore). */
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -187,6 +189,8 @@ if (gotSingleInstanceLock) {
 app.whenReady().then(() => {
   if (!gotSingleInstanceLock) return;
 
+  loadEnvFiles(app);
+
   if (!process.env.VITE_DEV_SERVER_URL) {
     registerRendererAppProtocol();
   }
@@ -195,7 +199,6 @@ app.whenReady().then(() => {
     app,
     ipcMain,
     getMainWindow: () => mainWindow,
-    getIsAdmin: () => currentSession?.role === "admin",
   });
   createWindow();
 
