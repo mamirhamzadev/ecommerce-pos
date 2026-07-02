@@ -1,6 +1,6 @@
 {
   "name": "pos-mushtaq",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Electron POS shell with SQLite auth (admin / user)",
   "repository": {
     "type": "git",

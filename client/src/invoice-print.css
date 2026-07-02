@@ -107,9 +107,9 @@
 
 /* INTIMATION — amount beside مبلغ روپیہ */
 .post-form-p2-intimation-amount {
-  right: 115px;
-  top: 907px;
-  width: 170px;
+  right: 90px;
+  top: 807px;
+  width: 185px;
   font-size: 20px;
   text-align: center;
   white-space: nowrap;
@@ -143,6 +143,7 @@
   top: 980px;
   width: 475px;
   font-size: 16px;
+  text-align: right;
   white-space: nowrap;
   overflow: hidden;
 }
