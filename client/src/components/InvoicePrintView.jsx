@@ -4,9 +4,11 @@ import { APP_NAME } from '../appName';
 import { parseDbTimestamp } from '../RelativeTime';
 import postFormPage1 from '../assets/print/post-form-page-1.png';
 import postFormPage2 from '../assets/print/post-form-page-2.png';
+import stampImg from '../assets/print/stamp.png';
+import footerImg from '../assets/print/footer.png';
 import '../invoice-print.css';
 
-const PRINT_FORM_PAGES = [postFormPage1, postFormPage2];
+const PRINT_FORM_PAGES = [postFormPage1, postFormPage2, stampImg, footerImg];
 
 /** Preload postal form scans so pages 1–2 are ready before window.print(). */
 export function preloadPrintFormPages() {
@@ -82,16 +84,6 @@ function buildInvoiceQrPayload(orderNo, trackingId) {
     return `${order}\n${tracking}`;
   }
   return order;
-}
-
-function statusLabel(status) {
-  const s = String(status || 'draft').toLowerCase();
-  if (s === 'pending') return 'Pending';
-  if (s === 'delivered') return 'Delivered';
-  if (s === 'cancelled') return 'Cancelled';
-  if (s === 'draft') return 'Draft';
-  if (s === 'paid') return 'Paid';
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /** Normalize line items so displayed amounts always match qty × unit price. */
@@ -209,14 +201,6 @@ function CustomerBlock({ invoice }) {
 export function InvoicePrintView({ invoice }) {
   const lines = normalizeLines(invoice.items);
   const totals = buildTotals(lines, invoice);
-  const issuedBy =
-    String(invoice.issued_by_name || '').trim() ||
-    String(invoice.issued_by_username || '').trim() ||
-    '—';
-  const orderStatus = invoice.order_status
-    ? statusLabel(invoice.order_status)
-    : null;
-  const invoiceStatus = statusLabel(invoice.status);
   const issuedAt = formatInvoiceDate(invoice.created_at);
   const issuedTime = formatInvoiceTime(invoice.created_at);
   const note = String(invoice.note || '').trim();
@@ -240,64 +224,29 @@ export function InvoicePrintView({ invoice }) {
         <div className="invoice-sheet-body">
           <header className="invoice-sheet-header">
             <div className="invoice-brand">
-              <div className="invoice-brand-mark" aria-hidden="true">
-                {APP_NAME.slice(0, 1).toUpperCase()}
-              </div>
-              <div>
-                <p className="invoice-brand-name">{APP_NAME}</p>
-                <p className="invoice-brand-tagline">Sales Invoice</p>
-              </div>
+              <img src={stampImg} alt="" className="invoice-stamp-img" />
             </div>
-            <div className={`invoice-title-block${qrPayload ? ' invoice-title-block-has-qr' : ''}`}>
-              <p className="invoice-doc-label">Tax Invoice</p>
-              <h1 className="invoice-number">{invoice.invoice_number}</h1>
-              <span
-                className={`invoice-status invoice-status-${String(invoice.status || 'draft').toLowerCase()}`}
-              >
-                {invoiceStatus}
-              </span>
-              {qrPayload ? (
-                <div className="invoice-qr-wrap" aria-hidden="true">
-                  <QRCodeSVG
-                    value={qrPayload}
-                    size={68}
-                    level="M"
-                    marginSize={0}
-                    bgColor="#ffffff"
-                    fgColor="#0f172a"
-                  />
-                </div>
-              ) : null}
-            </div>
+            {qrPayload ? (
+              <div className="invoice-qr-wrap" aria-hidden="true">
+                <QRCodeSVG
+                  value={qrPayload}
+                  size={68}
+                  level="M"
+                  marginSize={0}
+                  bgColor="#ffffff"
+                  fgColor="#0f172a"
+                />
+              </div>
+            ) : null}
+            <span className="invoice-bulk-user" aria-hidden="true">Bulk User</span>
           </header>
 
           <div className="invoice-meta-grid">
             <section className="invoice-meta-card">
-              <h2>Bill To</h2>
               <CustomerBlock invoice={invoice} />
             </section>
             <section className="invoice-meta-card">
-              <h2>Invoice Details</h2>
               <dl className="invoice-details-dl">
-                <div>
-                  <dt>Date</dt>
-                  <dd>
-                    {issuedAt}
-                    {issuedTime ? ` · ${issuedTime}` : ''}
-                  </dd>
-                </div>
-                {invoice.order_number ? (
-                  <div>
-                    <dt>Order No.</dt>
-                    <dd className="invoice-mono">{invoice.order_number}</dd>
-                  </div>
-                ) : null}
-                {orderStatus ? (
-                  <div>
-                    <dt>Order status</dt>
-                    <dd>{orderStatus}</dd>
-                  </div>
-                ) : null}
                 {trackingId ? (
                   <div>
                     <dt>Tracking ID</dt>
@@ -305,8 +254,21 @@ export function InvoicePrintView({ invoice }) {
                   </div>
                 ) : null}
                 <div>
-                  <dt>Prepared by</dt>
-                  <dd>{issuedBy}</dd>
+                  <dt>Invoice No.</dt>
+                  <dd className="invoice-mono">{invoice.invoice_number}</dd>
+                </div>
+                {invoice.order_number ? (
+                  <div>
+                    <dt>Order No.</dt>
+                    <dd className="invoice-mono">{invoice.order_number}</dd>
+                  </div>
+                ) : null}
+                <div>
+                  <dt>Date</dt>
+                  <dd>
+                    {issuedAt}
+                    {issuedTime ? ` · ${issuedTime}` : ''}
+                  </dd>
                 </div>
               </dl>
             </section>
@@ -320,15 +282,13 @@ export function InvoicePrintView({ invoice }) {
                   <th className="invoice-col-desc">Description</th>
                   <th className="invoice-col-num">Qty</th>
                   <th className="invoice-col-num">Unit wt.</th>
-                  <th className="invoice-col-num">Line wt.</th>
-                  <th className="invoice-col-money">Unit price</th>
                   <th className="invoice-col-money">Amount</th>
                 </tr>
               </thead>
               <tbody>
                 {lines.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="invoice-lines-empty">
+                    <td colSpan={5} className="invoice-lines-empty">
                       No line items on this order.
                     </td>
                   </tr>
@@ -341,10 +301,6 @@ export function InvoicePrintView({ invoice }) {
                       <td className="invoice-col-num">
                         {formatWeightG(row.unitWeightG) || '—'}
                       </td>
-                      <td className="invoice-col-num">
-                        {formatWeightG(row.lineWeightG) || '—'}
-                      </td>
-                      <td className="invoice-col-money">{pkr.format(row.unitPrice)}</td>
                       <td className="invoice-col-money invoice-amount-cell">
                         {pkr.format(row.lineTotal)}
                       </td>
@@ -365,23 +321,6 @@ export function InvoicePrintView({ invoice }) {
           ) : null}
 
           <section className="invoice-summary" aria-label="Invoice totals">
-            <div className="invoice-summary-meta">
-              <div className="invoice-summary-stat">
-                <span className="invoice-summary-stat-label">Line items</span>
-                <span className="invoice-summary-stat-value">{totals.lineCount}</span>
-              </div>
-              <div className="invoice-summary-stat">
-                <span className="invoice-summary-stat-label">Total quantity</span>
-                <span className="invoice-summary-stat-value">{qtyFmt.format(totals.totalQty)}</span>
-              </div>
-              <div className="invoice-summary-stat">
-                <span className="invoice-summary-stat-label">Total weight</span>
-                <span className="invoice-summary-stat-value">
-                  {formatWeightG(totals.totalWeightG) || '—'}
-                </span>
-              </div>
-            </div>
-
             <table className="invoice-totals-table">
               <tbody>
                 <tr>
@@ -401,13 +340,7 @@ export function InvoicePrintView({ invoice }) {
           </section>
 
           <footer className="invoice-legal">
-            <p className="invoice-thanks">Thank you for your purchase.</p>
-            <p className="invoice-legal-muted">
-              Document ref. {invoice.invoice_number}
-              {invoice.order_number ? ` · Order ${invoice.order_number}` : ''}
-              {' · '}
-              All amounts in Pakistani Rupees (PKR).
-            </p>
+            <img src={footerImg} alt="" className="invoice-footer-img" />
           </footer>
         </div>
       </article>

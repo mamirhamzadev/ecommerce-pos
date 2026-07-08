@@ -194,11 +194,12 @@
 /* —— Header —— */
 
 .invoice-sheet-header {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  padding-bottom: 5mm;
+  padding-bottom: 2mm;
   margin-bottom: 5mm;
   border-bottom: 1.5pt solid var(--inv-accent);
 }
@@ -207,6 +208,31 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.invoice-stamp-img {
+  display: block;
+  width: 50mm;
+  height: 20mm;
+  object-fit: fill;
+  object-position: left center;
+}
+
+/* Tilted "Bulk User" mark overlapping (and hiding) the header bottom border */
+.invoice-bulk-user {
+  position: absolute;
+  right: 0;
+  bottom: -4mm;
+  z-index: 2;
+  padding: 1mm 3mm;
+  background: #fff;
+  transform: rotate(45deg);
+  transform-origin: right bottom;
+  font-size: 16pt;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--inv-accent-dark);
+  white-space: nowrap;
 }
 
 .invoice-brand-mark {
@@ -278,6 +304,7 @@
 
 .invoice-qr-wrap {
   flex-shrink: 0;
+  margin-right: 22mm;
   line-height: 0;
   padding: 2px;
   border: 0.75pt solid var(--inv-border);
@@ -539,10 +566,8 @@
 }
 
 .invoice-summary {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6mm;
-  align-items: end;
+  display: flex;
+  justify-content: flex-end;
   padding-top: 3mm;
   border-top: 1pt solid var(--inv-border);
 }
@@ -632,6 +657,14 @@
   text-align: center;
 }
 
+.invoice-footer-img {
+  display: block;
+  width: 60%;
+  height: 25mm;
+  object-fit: fill;
+  margin: 0 auto;
+}
+
 .invoice-thanks {
   margin: 0 0 1.5mm;
   font-size: 9.5pt;
@@ -706,6 +739,7 @@
   }
 
   .invoice-brand-mark,
+  .invoice-bulk-user,
   .invoice-lines thead,
   .invoice-totals-grand-row th,
   .invoice-totals-grand-row td,
