@@ -69,12 +69,6 @@ function formatAmountFigures(n) {
   return amountFiguresFmt.format(roundMoney(n));
 }
 
-function formatInvoiceTime(iso) {
-  const d = parseDbTimestamp(iso);
-  if (!d || !d.isValid()) return '';
-  return d.local().format('hh:mm A');
-}
-
 /** QR payload: orderNo on first line; trackingId on second when present. */
 function buildInvoiceQrPayload(orderNo, trackingId) {
   const order = String(orderNo || '').trim();
@@ -171,30 +165,6 @@ function PostFormPage2Overlay({ invoice, totals }) {
 }
 
 /**
- * @param {{ invoice: import('../../global').InvoiceForPrint }} props
- */
-function CustomerBlock({ invoice }) {
-  const name = String(invoice.customer_name || '').trim();
-  const contact = String(invoice.customer_contact || '').trim();
-  const city = String(invoice.customer_city || '').trim();
-  const address = String(invoice.customer_address || '').trim();
-  const hasAny = name || contact || city || address;
-
-  if (!hasAny) {
-    return <p className="invoice-meta-empty">No customer details recorded.</p>;
-  }
-
-  return (
-    <>
-      {name ? <p className="invoice-customer-name">{name}</p> : null}
-      {contact ? <p className="invoice-meta-line">{contact}</p> : null}
-      {city ? <p className="invoice-meta-line">{city}</p> : null}
-      {address ? <p className="invoice-meta-line invoice-address">{address}</p> : null}
-    </>
-  );
-}
-
-/**
  * Printable invoice layout — full A4, shown only during window.print().
  * @param {{ invoice: import('../../global').InvoiceForPrint }} props
  */
@@ -202,11 +172,16 @@ export function InvoicePrintView({ invoice }) {
   const lines = normalizeLines(invoice.items);
   const totals = buildTotals(lines, invoice);
   const issuedAt = formatInvoiceDate(invoice.created_at);
-  const issuedTime = formatInvoiceTime(invoice.created_at);
-  const note = String(invoice.note || '').trim();
   const trackingId = String(invoice.tracking_id || '').trim();
   const orderNo = String(invoice.order_number || '').trim();
   const qrPayload = buildInvoiceQrPayload(orderNo, trackingId);
+  const customerName = String(invoice.customer_name || '').trim();
+  const customerContact = String(invoice.customer_contact || '').trim();
+  const customerCity = String(invoice.customer_city || '').trim();
+  const customerAddress = String(invoice.customer_address || '').trim();
+  const totalWeight = formatWeightG(totals.totalWeightG) || '';
+  const urduNotice =
+    'محترم پوسٹ مین: اگر پیکٹ کو کسٹمر تک نہ پہنچایا گیا اور بغیر واضح عذر کے واپس کیا گیا تو شکایت درج کرائی جا سکتی ہے۔ شکریہ\nفون لازمی کر کے اطلاع دیں۔';
 
   const content = (
     <div className="invoice-print-root" aria-hidden="true">
@@ -220,128 +195,123 @@ export function InvoicePrintView({ invoice }) {
         </div>
       </div>
       <div className="invoice-print-page invoice-print-invoice-page">
-      <article className="invoice-sheet">
-        <div className="invoice-sheet-body">
-          <header className="invoice-sheet-header">
-            <div className="invoice-brand">
-              <img src={stampImg} alt="" className="invoice-stamp-img" />
+      <article className="inv3-sheet">
+        <header className="inv3-header">
+          <div className="inv3-header-col">
+            <div className="inv3-stamp-box">
+              <img src={stampImg} alt="" className="inv3-stamp-img" />
             </div>
-            {qrPayload ? (
-              <div className="invoice-qr-wrap" aria-hidden="true">
-                <QRCodeSVG
-                  value={qrPayload}
-                  size={68}
-                  level="M"
-                  marginSize={0}
-                  bgColor="#ffffff"
-                  fgColor="#0f172a"
-                />
-              </div>
-            ) : null}
-            <span className="invoice-bulk-user" aria-hidden="true">Bulk User</span>
-          </header>
-
-          <div className="invoice-meta-grid">
-            <section className="invoice-meta-card">
-              <CustomerBlock invoice={invoice} />
-            </section>
-            <section className="invoice-meta-card">
-              <dl className="invoice-details-dl">
-                {trackingId ? (
-                  <div>
-                    <dt>Tracking ID</dt>
-                    <dd className="invoice-mono">{trackingId}</dd>
-                  </div>
-                ) : null}
-                <div>
-                  <dt>Invoice No.</dt>
-                  <dd className="invoice-mono">{invoice.invoice_number}</dd>
-                </div>
-                {invoice.order_number ? (
-                  <div>
-                    <dt>Order No.</dt>
-                    <dd className="invoice-mono">{invoice.order_number}</dd>
-                  </div>
-                ) : null}
-                <div>
-                  <dt>Date</dt>
-                  <dd>
-                    {issuedAt}
-                    {issuedTime ? ` · ${issuedTime}` : ''}
-                  </dd>
-                </div>
-              </dl>
-            </section>
+            <div className="inv3-underline inv3-nic">
+              <span className="inv3-value inv3-value-strong">33303-1500269-7</span>
+            </div>
           </div>
+          <div className="inv3-header-col inv3-header-col-right">
+            <div className="inv3-brand-row">
+              <div className="inv3-qr-wrap">
+                <span className="inv3-bulk-user">BULK USER</span>
+                <div className="inv3-qr-box" aria-hidden="true">
+                  {qrPayload ? (
+                    <QRCodeSVG
+                      value={qrPayload}
+                      size={128}
+                      level="M"
+                      marginSize={0}
+                      bgColor="#ffffff"
+                      fgColor="#111111"
+                    />
+                  ) : (
+                    <span className="inv3-qr-placeholder">QR Code</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="inv3-underline inv3-total-amount">
+              <span className="inv3-label">Total Amount</span>
+              <span className="inv3-value">{pkr.format(totals.grandTotal)}</span>
+            </div>
+          </div>
+        </header>
 
-          <div className="invoice-lines-wrap">
-            <table className="invoice-lines">
+        <div className="inv3-box inv3-customer">
+          <div className="inv3-field">
+            <span className="inv3-label">Number/Email</span>
+            <span className="inv3-value">{customerContact}</span>
+          </div>
+          <div className="inv3-field">
+            <span className="inv3-label">Name</span>
+            <span className="inv3-value">{customerName}</span>
+          </div>
+          <div className="inv3-field">
+            <span className="inv3-label">Address</span>
+            <span className="inv3-value inv3-value-strong">{customerAddress}</span>
+          </div>
+          <div className="inv3-field">
+            <span className="inv3-label">City</span>
+            <span className="inv3-value">{customerCity}</span>
+          </div>
+        </div>
+
+        <div className="inv3-main">
+          <div className="inv3-box inv3-items">
+            <table className="inv3-items-table">
               <thead>
                 <tr>
-                  <th className="invoice-col-idx">#</th>
-                  <th className="invoice-col-desc">Description</th>
-                  <th className="invoice-col-num">Qty</th>
-                  <th className="invoice-col-num">Unit wt.</th>
-                  <th className="invoice-col-money">Amount</th>
+                  <th className="inv3-col-idx">#</th>
+                  <th className="inv3-col-name">Item name</th>
+                  <th className="inv3-col-qty">Qty</th>
                 </tr>
               </thead>
               <tbody>
                 {lines.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="invoice-lines-empty">
-                      No line items on this order.
+                    <td colSpan={3} className="inv3-items-empty">
+                      No items on this order.
                     </td>
                   </tr>
                 ) : (
                   lines.map((row, idx) => (
                     <tr key={row.key}>
-                      <td className="invoice-col-idx">{idx + 1}</td>
-                      <td className="invoice-col-desc invoice-item-name">{row.productName}</td>
-                      <td className="invoice-col-num">{qtyFmt.format(row.qty)}</td>
-                      <td className="invoice-col-num">
-                        {formatWeightG(row.unitWeightG) || '—'}
-                      </td>
-                      <td className="invoice-col-money invoice-amount-cell">
-                        {pkr.format(row.lineTotal)}
-                      </td>
+                      <td className="inv3-col-idx">{idx + 1}</td>
+                      <td className="inv3-col-name">{row.productName}</td>
+                      <td className="inv3-col-qty">{qtyFmt.format(row.qty)}</td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
           </div>
-        </div>
 
-        <div className="invoice-sheet-footer">
-          {note ? (
-            <section className="invoice-note">
-              <h2>Order Note</h2>
-              <p>{note}</p>
-            </section>
-          ) : null}
+          <div className="inv3-side">
+            <div className="inv3-box inv3-side-meta">
+              <div className="inv3-field inv3-field-split">
+                <span className="inv3-label">Date</span>
+                <span className="inv3-value">{issuedAt}</span>
+              </div>
+              <div className="inv3-field inv3-field-split">
+                <span className="inv3-label">Tracking ID</span>
+                <span className="inv3-value">{trackingId}</span>
+              </div>
+              <div className="inv3-field inv3-field-split">
+                <span className="inv3-label">Invoice No</span>
+                <span className="inv3-value">{invoice.invoice_number}</span>
+              </div>
+            </div>
 
-          <section className="invoice-summary" aria-label="Invoice totals">
-            <table className="invoice-totals-table">
-              <tbody>
-                <tr>
-                  <th scope="row">Items subtotal</th>
-                  <td>{pkr.format(totals.itemsSubtotal)}</td>
-                </tr>
-                <tr>
-                  <th scope="row">Delivery charges</th>
-                  <td>{pkr.format(totals.delivery)}</td>
-                </tr>
-                <tr className="invoice-totals-grand-row">
-                  <th scope="row">Total payable (PKR)</th>
-                  <td>{pkr.format(totals.grandTotal)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
+            <div className="inv3-box inv3-side-meta">
+              <div className="inv3-field inv3-field-split">
+                <span className="inv3-label">Total Weight</span>
+                <span className="inv3-value">{totalWeight}</span>
+              </div>
+              <div className="inv3-field inv3-field-split">
+                <span className="inv3-label">Delivery Charges</span>
+                <span className="inv3-value">{pkr.format(totals.delivery)}</span>
+              </div>
+            </div>
 
-          <footer className="invoice-legal">
-            <img src={footerImg} alt="" className="invoice-footer-img" />
-          </footer>
+            <div className="inv3-urdu">
+              <p className="inv3-urdu-text">{urduNotice}</p>
+            </div>
+          </div>
         </div>
       </article>
       </div>

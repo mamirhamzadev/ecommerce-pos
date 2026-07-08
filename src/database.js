@@ -201,11 +201,25 @@ function initDatabase(app) {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS customer_tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contact TEXT NOT NULL UNIQUE,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_customer_tags_contact ON customer_tags(contact);
+  `);
+
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_login_events_time ON login_events(logged_in_at);`,
   );
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);`,
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at);`,
   );
 
   db.exec(`
@@ -226,12 +240,22 @@ function initDatabase(app) {
     CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
   `);
 
+  const itemColNames = new Set(
+    db.prepare('PRAGMA table_info(order_items)').all().map((c) => c.name),
+  );
+  if (!itemColNames.has('base_unit_weight_g')) {
+    db.exec(`ALTER TABLE order_items ADD COLUMN base_unit_weight_g REAL;`);
+  }
+  if (!itemColNames.has('base_unit_price')) {
+    db.exec(`ALTER TABLE order_items ADD COLUMN base_unit_price REAL;`);
+  }
+
   db.exec(`
     INSERT INTO order_items (order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total)
     SELECT o.id,
            0,
            NULL,
-           CASE WHEN trim(COALESCE(o.product_name, '')) != '' THEN o.product_name ELSE 'Line item' END,
+           CASE WHEN trim(COALESCE(o.product_name, '')) != '' THEN o.product_name ELSE 'Item' END,
            CASE WHEN o.qty > 0 THEN o.qty ELSE 1 END,
            CASE WHEN o.weight_g >= 0 THEN o.weight_g ELSE 0 END,
            CASE WHEN o.unit_price >= 0 THEN o.unit_price ELSE 0 END,
@@ -492,11 +516,18 @@ const productQueries = {
   },
 };
 
+/** Effective line total: use the provided lineTotal, falling back to qty × unit price. */
+function lineTotalFor(L) {
+  const lt = Number(L.lineTotal);
+  if (Number.isFinite(lt) && lt >= 0) return lt;
+  return Number(L.qty) * Number(L.unitPrice);
+}
+
 function attachOrderItems(db, orderRow) {
   if (!orderRow) return undefined;
   const items = db
     .prepare(
-      `SELECT id, order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total
+      `SELECT id, order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total, base_unit_weight_g, base_unit_price
        FROM order_items WHERE order_id = ? ORDER BY sort_order ASC, id ASC`,
     )
     .all(orderRow.id);
@@ -508,10 +539,28 @@ function listOrderItemsForOrders(db, orderIds) {
   const ph = orderIds.map(() => '?').join(',');
   return db
     .prepare(
-      `SELECT id, order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total
+      `SELECT id, order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total, base_unit_weight_g, base_unit_price
        FROM order_items WHERE order_id IN (${ph}) ORDER BY order_id, sort_order ASC, id ASC`,
     )
     .all(...orderIds);
+}
+
+/**
+ * Push inclusive date-range fragments for a UTC `created_at` column.
+ * created_at is stored as UTC; convert to localtime so it matches the local
+ * calendar dates the user picks in the UI.
+ */
+function pushDateRange(fragments, params, col, dateFrom, dateTo) {
+  const from = String(dateFrom ?? '').trim();
+  const to = String(dateTo ?? '').trim();
+  if (from) {
+    fragments.push(`date(${col}, 'localtime') >= date(?)`);
+    params.push(from);
+  }
+  if (to) {
+    fragments.push(`date(${col}, 'localtime') <= date(?)`);
+    params.push(to);
+  }
 }
 
 /** WHERE for `orders o` — status + search on customer name, order #, or internal id */
@@ -546,6 +595,29 @@ function buildOrderListWhere(filters) {
     params.push(ql, ql, q);
   }
 
+  const tag = String(filters?.tag ?? 'all').trim().toLowerCase();
+  if (tag && tag !== 'all') {
+    const tagExpr = `(SELECT ct.tag FROM customer_tags ct
+      WHERE ct.contact = lower(trim(o.customer_contact)) AND trim(o.customer_contact) != '')`;
+    if (tag === 'none') {
+      fragments.push(`(${tagExpr} IS NULL)`);
+    } else if (tag === 'green' || tag === 'yellow' || tag === 'red') {
+      fragments.push(`(${tagExpr} = ?)`);
+      params.push(tag);
+    }
+  }
+
+  pushDateRange(fragments, params, 'o.created_at', filters?.dateFrom, filters?.dateTo);
+
+  const whereSql = fragments.length ? `WHERE ${fragments.join(' AND ')}` : '';
+  return { whereSql, params };
+}
+
+/** WHERE for `invoices i` — created_at date range only. */
+function buildInvoiceListWhere(filters) {
+  const fragments = [];
+  const params = [];
+  pushDateRange(fragments, params, 'i.created_at', filters?.dateFrom, filters?.dateTo);
   const whereSql = fragments.length ? `WHERE ${fragments.join(' AND ')}` : '';
   return { whereSql, params };
 }
@@ -622,8 +694,11 @@ const invoiceQueries = {
     }
   },
 
-  listInvoicesPaged(db, page, pageSize) {
-    const total = db.prepare(`SELECT COUNT(*) AS c FROM invoices`).get().c;
+  listInvoicesPaged(db, page, pageSize, filters = {}) {
+    const { whereSql, params: whereParams } = buildInvoiceListWhere(filters);
+    const total = db
+      .prepare(`SELECT COUNT(*) AS c FROM invoices i ${whereSql}`)
+      .get(...whereParams).c;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const safePage = Math.min(Math.max(1, page), totalPages);
     const offset = (safePage - 1) * pageSize;
@@ -635,10 +710,11 @@ const invoiceQueries = {
          FROM invoices i
          LEFT JOIN orders o ON o.id = i.order_id
          LEFT JOIN users u ON u.id = i.user_id
+         ${whereSql}
          ORDER BY datetime(i.created_at) DESC, i.id DESC
          LIMIT ? OFFSET ?`,
       )
-      .all(pageSize, offset);
+      .all(...whereParams, pageSize, offset);
     return { rows, total, page: safePage, pageSize };
   },
 
@@ -746,7 +822,10 @@ const orderQueries = {
                 (COALESCE(
                   (SELECT SUM(i.line_total) FROM order_items i WHERE i.order_id = o.id),
                   0
-                ) + COALESCE(o.delivery_charges, 0)) AS total
+                ) + COALESCE(o.delivery_charges, 0)) AS total,
+                (SELECT ct.tag FROM customer_tags ct
+                  WHERE ct.contact = lower(trim(o.customer_contact))
+                    AND trim(o.customer_contact) != '') AS tag
          FROM orders o
          LEFT JOIN users u ON u.id = o.placed_by_user_id
          ${whereSql}
@@ -809,7 +888,7 @@ const orderQueries = {
     const tx = db.transaction(() => {
       let sumLines = 0;
       for (const L of lines) {
-        sumLines += L.qty * L.unitPrice;
+        sumLines += lineTotalFor(L);
       }
       const grandTotal = sumLines + safeDelivery;
       const first = lines[0] || {};
@@ -840,11 +919,10 @@ const orderQueries = {
         );
       newId = Number(info.lastInsertRowid);
       const insItem = db.prepare(
-        `INSERT INTO order_items (order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO order_items (order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total, base_unit_weight_g, base_unit_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       lines.forEach((L, idx) => {
-        const lineTotal = L.qty * L.unitPrice;
         insItem.run(
           newId,
           idx,
@@ -853,7 +931,9 @@ const orderQueries = {
           L.qty,
           L.weightG,
           L.unitPrice,
-          lineTotal,
+          lineTotalFor(L),
+          L.baseUnitWeightG != null ? Number(L.baseUnitWeightG) : null,
+          L.baseUnitPrice != null ? Number(L.baseUnitPrice) : null,
         );
       });
       const invoiceNumber = invoiceQueries.generateInvoiceNumber(db);
@@ -891,7 +971,7 @@ const orderQueries = {
     const tx = db.transaction(() => {
       let sumLines = 0;
       for (const L of lines) {
-        sumLines += L.qty * L.unitPrice;
+        sumLines += lineTotalFor(L);
       }
       const grandTotal = sumLines + safeDelivery;
       const first = lines[0] || {};
@@ -919,11 +999,10 @@ const orderQueries = {
       );
       db.prepare(`DELETE FROM order_items WHERE order_id = ?`).run(id);
       const insItem = db.prepare(
-        `INSERT INTO order_items (order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO order_items (order_id, sort_order, product_id, product_name, qty, weight_g, unit_price, line_total, base_unit_weight_g, base_unit_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       lines.forEach((L, idx) => {
-        const lineTotal = L.qty * L.unitPrice;
         insItem.run(
           id,
           idx,
@@ -932,7 +1011,9 @@ const orderQueries = {
           L.qty,
           L.weightG,
           L.unitPrice,
-          lineTotal,
+          lineTotalFor(L),
+          L.baseUnitWeightG != null ? Number(L.baseUnitWeightG) : null,
+          L.baseUnitPrice != null ? Number(L.baseUnitPrice) : null,
         );
       });
       invoiceQueries.syncAmountForOrder(db, {
@@ -955,6 +1036,24 @@ const orderQueries = {
       db.prepare(`DELETE FROM orders WHERE id = ?`).run(id);
     });
     tx();
+  },
+};
+
+const tagQueries = {
+  /** Upsert a Green/Yellow/Red tag against a normalized (lowercased) contact. */
+  setTag(db, contact, tag) {
+    const c = String(contact || '').trim().toLowerCase();
+    if (!c) return;
+    db.prepare(
+      `INSERT INTO customer_tags (contact, tag) VALUES (?, ?)
+       ON CONFLICT(contact) DO UPDATE SET tag = excluded.tag, updated_at = datetime('now')`,
+    ).run(c, tag);
+  },
+
+  removeTag(db, contact) {
+    const c = String(contact || '').trim().toLowerCase();
+    if (!c) return;
+    db.prepare(`DELETE FROM customer_tags WHERE contact = ?`).run(c);
   },
 };
 
@@ -1090,4 +1189,5 @@ module.exports = {
   resetQueries,
   dashboardQueries,
   installationQueries,
+  tagQueries,
 };

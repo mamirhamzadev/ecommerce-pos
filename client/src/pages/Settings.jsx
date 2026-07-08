@@ -6,7 +6,7 @@ import { notifyError, notifyInfo, notifySuccess } from '../lib/notify';
 const BACKUP_OPTIONS = [
   { key: 'logins', label: 'Logins', hint: 'User accounts and login history' },
   { key: 'products', label: 'Products', hint: 'Product catalog' },
-  { key: 'orders', label: 'Orders', hint: 'Orders and line items' },
+  { key: 'orders', label: 'Orders', hint: 'Orders and items' },
   { key: 'invoices', label: 'Invoices', hint: 'Invoice records' },
 ];
 

@@ -25,12 +25,19 @@ function Invoices() {
   const [loading, setLoading] = useState(true);
   const [printInvoice, setPrintInvoice] = useState(null);
   const [printingId, setPrintingId] = useState(null);
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
   const printTriggered = useRef(false);
 
   const loadList = useCallback(async (p, ps) => {
     setListError('');
     setLoading(true);
-    const res = await getApi().listInvoicesPaged({ page: p, pageSize: ps });
+    const res = await getApi().listInvoicesPaged({
+      page: p,
+      pageSize: ps,
+      dateFrom: filterDateFrom,
+      dateTo: filterDateTo,
+    });
     setLoading(false);
     if (res.ok === true) {
       setInvoices(res.invoices);
@@ -43,7 +50,15 @@ function Invoices() {
     setListError(res.error || 'Could not load invoices.');
     notifyError(res.error || 'Could not load invoices.');
     return false;
-  }, []);
+  }, [filterDateFrom, filterDateTo]);
+
+  const hasActiveFilters = filterDateFrom !== '' || filterDateTo !== '';
+
+  function clearInvoiceFilters() {
+    setFilterDateFrom('');
+    setFilterDateTo('');
+    setPage(1);
+  }
 
   useEffect(() => {
     loadList(page, pageSize);
@@ -92,7 +107,7 @@ function Invoices() {
           <h2 className="section-title">Invoices</h2>
           <p className="section-desc section-desc-tight">
             A draft invoice is created automatically whenever you place an order. Amounts include
-            line items plus delivery charges.
+            items plus delivery charges.
           </p>
         </div>
       </div>
@@ -129,6 +144,48 @@ function Invoices() {
         <p className="section-desc section-desc-tight">
           {total} invoice{total === 1 ? '' : 's'} total.
         </p>
+
+        <div className="orders-filter-bar">
+          <div className="orders-filter-field">
+            <span className="field-label" id="invoices-filter-from-label">
+              From date
+            </span>
+            <input
+              id="invoices-filter-from"
+              type="date"
+              className="orders-filter-select"
+              aria-labelledby="invoices-filter-from-label"
+              value={filterDateFrom}
+              max={filterDateTo || undefined}
+              onChange={(e) => {
+                setFilterDateFrom(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+          <div className="orders-filter-field">
+            <span className="field-label" id="invoices-filter-to-label">
+              To date
+            </span>
+            <input
+              id="invoices-filter-to"
+              type="date"
+              className="orders-filter-select"
+              aria-labelledby="invoices-filter-to-label"
+              value={filterDateTo}
+              min={filterDateFrom || undefined}
+              onChange={(e) => {
+                setFilterDateTo(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+          {hasActiveFilters ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={clearInvoiceFilters}>
+              Clear filters
+            </button>
+          ) : null}
+        </div>
 
         <div className="table-wrap">
           {loading ? (

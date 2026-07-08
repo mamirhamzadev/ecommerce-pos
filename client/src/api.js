@@ -4,6 +4,7 @@ function wrapApi(raw) {
   const needsInvoicePrintPatch = typeof raw.getInvoiceForPrint !== 'function';
   const needsDeleteAllInvoicesPatch = typeof raw.deleteAllInvoices !== 'function';
   const needsPickerPatch = typeof raw.listProductsPicker !== 'function';
+  const needsTagPatch = typeof raw.setCustomerTag !== 'function';
   const needsPasswordPatch = typeof raw.changePassword !== 'function';
   const needsUserPatch = typeof raw.updateUser !== 'function';
   const needsUpdaterPatch =
@@ -23,6 +24,7 @@ function wrapApi(raw) {
     !needsInvoicePrintPatch &&
     !needsDeleteAllInvoicesPatch &&
     !needsPickerPatch &&
+    !needsTagPatch &&
     !needsPasswordPatch &&
     !needsUserPatch &&
     !needsUpdaterPatch &&
@@ -69,6 +71,11 @@ function wrapApi(raw) {
       ...(needsPickerPatch
         ? {
             listProductsPicker: (payload) => raw.invoke('products:listPicker', payload),
+          }
+        : {}),
+      ...(needsTagPatch
+        ? {
+            setCustomerTag: (payload) => raw.invoke('tags:set', payload),
           }
         : {}),
       ...(needsPasswordPatch
@@ -170,6 +177,16 @@ function wrapApi(raw) {
             Promise.reject(
               new Error(
                 'Product picker requires a full app restart after updating preload.',
+              ),
+            ),
+        }
+      : {}),
+    ...(needsTagPatch
+      ? {
+          setCustomerTag: () =>
+            Promise.reject(
+              new Error(
+                'Customer tagging requires a full app restart after updating preload.',
               ),
             ),
         }

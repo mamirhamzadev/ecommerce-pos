@@ -35,6 +35,7 @@ const {
   resetQueries,
   dashboardQueries,
   installationQueries,
+  tagQueries,
 } = require("./src/database");
 const { hashPassword, verifyPassword } = require("./src/auth");
 const { sendEmail } = require("./src/helpers");
@@ -707,8 +708,14 @@ ipcMain.handle("orders:listPaged", async (_event, payload) => {
     payload.sortDir.trim().toLowerCase() === "asc"
       ? "asc"
       : "desc";
+  const dateFrom = normalizeDateInput(payload?.dateFrom);
+  const dateTo = normalizeDateInput(payload?.dateTo);
+  const tag =
+    typeof payload?.tag === "string" && payload.tag.trim()
+      ? payload.tag.trim().toLowerCase()
+      : "all";
   const { rows, total, page: safePage, pageSize: psOut } =
-    orderQueries.listOrdersPaged(db, p, ps, { status, q, sortBy, sortDir });
+    orderQueries.listOrdersPaged(db, p, ps, { status, q, sortBy, sortDir, dateFrom, dateTo, tag });
   return {
     ok: true,
     orders: rows,
@@ -721,7 +728,7 @@ ipcMain.handle("orders:listPaged", async (_event, payload) => {
 function normalizeOrderLines(payloadLines) {
   const raw = Array.isArray(payloadLines) ? payloadLines : [];
   if (raw.length === 0) {
-    return { ok: false, error: "Add at least one line item." };
+    return { ok: false, error: "Add at least one item." };
   }
   const lines = [];
   for (let i = 0; i < raw.length; i++) {
@@ -731,30 +738,49 @@ function normalizeOrderLines(payloadLines) {
     if (!productName || !Number.isFinite(pid) || pid <= 0) {
       return {
         ok: false,
-        error: `Line ${i + 1}: search the catalog and select a product.`,
+        error: `Item ${i + 1}: search the catalog and select a product.`,
       };
     }
     const qty = Number(ln.qty);
     const weightG = Number(ln.weightG);
     const unitPrice = Number(ln.unitPricePkr);
     if (!Number.isFinite(qty) || qty <= 0) {
-      return { ok: false, error: `Line ${i + 1}: quantity must be a positive number.` };
+      return { ok: false, error: `Item ${i + 1}: quantity must be a positive number.` };
     }
     if (!Number.isFinite(weightG) || weightG < 0) {
-      return { ok: false, error: `Line ${i + 1}: weight (g) must be zero or positive.` };
+      return { ok: false, error: `Item ${i + 1}: weight (g) must be zero or positive.` };
     }
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-      return { ok: false, error: `Line ${i + 1}: unit price must be zero or positive.` };
+      return { ok: false, error: `Item ${i + 1}: unit price must be zero or positive.` };
     }
+    const rawLineTotal = Number(ln.lineTotal);
+    const lineTotal =
+      Number.isFinite(rawLineTotal) && rawLineTotal >= 0 ? rawLineTotal : qty * unitPrice;
+    const rawBaseWeight = Number(ln.baseUnitWeightG);
+    const baseUnitWeightG =
+      Number.isFinite(rawBaseWeight) && rawBaseWeight >= 0 ? rawBaseWeight : null;
+    const rawBasePrice = Number(ln.baseUnitPrice);
+    const baseUnitPrice =
+      Number.isFinite(rawBasePrice) && rawBasePrice >= 0 ? rawBasePrice : null;
     lines.push({
       productId: pid,
       productName: productName.slice(0, 200),
       qty,
       weightG,
       unitPrice,
+      lineTotal,
+      baseUnitWeightG,
+      baseUnitPrice,
     });
   }
   return { ok: true, lines };
+}
+
+/** Accept only `YYYY-MM-DD` date strings (from <input type="date">); everything else → "". */
+function normalizeDateInput(value) {
+  if (typeof value !== "string") return "";
+  const v = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "";
 }
 
 function normalizeDeliveryCharges(value) {
@@ -771,8 +797,10 @@ ipcMain.handle("invoices:listPaged", async (_event, payload) => {
   }
   const p = Math.max(1, Math.floor(Number(payload?.page)) || 1);
   const ps = Math.min(100, Math.max(5, Math.floor(Number(payload?.pageSize)) || 10));
+  const dateFrom = normalizeDateInput(payload?.dateFrom);
+  const dateTo = normalizeDateInput(payload?.dateTo);
   const { rows, total, page: safePage, pageSize: psOut } =
-    invoiceQueries.listInvoicesPaged(db, p, ps);
+    invoiceQueries.listInvoicesPaged(db, p, ps, { dateFrom, dateTo });
   return {
     ok: true,
     invoices: rows,
@@ -904,6 +932,26 @@ ipcMain.handle("orders:patchStatus", async (_event, { id, status }) => {
   }
   orderQueries.updateOrderStatus(db, oid, normalizeOrderStatus(status));
   return { ok: true };
+});
+
+ipcMain.handle("tags:set", async (_event, { contact, tag }) => {
+  if (!currentSession) {
+    return { ok: false, error: "Forbidden." };
+  }
+  const c = String(contact || "").trim();
+  if (!c) {
+    return { ok: false, error: "This order has no phone/email to tag." };
+  }
+  const t = String(tag || "").trim().toLowerCase();
+  if (t === "" || t === "none") {
+    tagQueries.removeTag(db, c);
+    return { ok: true, tag: null };
+  }
+  if (t !== "green" && t !== "yellow" && t !== "red") {
+    return { ok: false, error: "Invalid tag." };
+  }
+  tagQueries.setTag(db, c, t);
+  return { ok: true, tag: t };
 });
 
 ipcMain.handle("orders:delete", async (_event, { id }) => {

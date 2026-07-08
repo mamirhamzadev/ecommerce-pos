@@ -247,6 +247,10 @@ declare global {
         sortBy?: string;
         /** `asc` | `desc` */
         sortDir?: string;
+        /** Inclusive start date `YYYY-MM-DD` */
+        dateFrom?: string;
+        /** Inclusive end date `YYYY-MM-DD` */
+        dateTo?: string;
       }) => Promise<
         | {
             ok: true;
@@ -276,6 +280,8 @@ declare global {
                 weight_g: number;
                 unit_price: number;
                 line_total: number;
+                base_unit_weight_g: number | null;
+                base_unit_price: number | null;
               }>;
             }>;
             total: number;
@@ -291,6 +297,9 @@ declare global {
           qty: number;
           weightG: number;
           unitPricePkr: number;
+          lineTotal?: number;
+          baseUnitWeightG?: number | null;
+          baseUnitPrice?: number | null;
         }>;
         customerName: string;
         customerContact: string;
@@ -309,6 +318,9 @@ declare global {
           qty: number;
           weightG: number;
           unitPricePkr: number;
+          lineTotal?: number;
+          baseUnitWeightG?: number | null;
+          baseUnitPrice?: number | null;
         }>;
         customerName: string;
         customerContact: string;
@@ -327,6 +339,10 @@ declare global {
       listInvoicesPaged: (payload: {
         page: number;
         pageSize: number;
+        /** Inclusive start date `YYYY-MM-DD` */
+        dateFrom?: string;
+        /** Inclusive end date `YYYY-MM-DD` */
+        dateTo?: string;
       }) => Promise<
         | {
             ok: true;
