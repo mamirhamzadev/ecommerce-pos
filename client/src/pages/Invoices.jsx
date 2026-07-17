@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getApi } from '../api';
 import { FaIcon } from '../components/FaIcon';
+import { BulkPrintModal } from '../components/BulkPrintModal';
 import { InvoicePrintView, preloadPrintFormPages } from '../components/InvoicePrintView';
 import { RelativeTime } from '../RelativeTime';
 import { notifyError } from '../lib/notify';
@@ -27,6 +28,10 @@ function Invoices() {
   const [printingId, setPrintingId] = useState(null);
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
+  const [bulkPrintInvoices, setBulkPrintInvoices] = useState([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const printTriggered = useRef(false);
 
   const loadList = useCallback(async (p, ps) => {
@@ -64,6 +69,20 @@ function Invoices() {
     loadList(page, pageSize);
   }, [page, pageSize, loadList]);
 
+  // Drop selections that are no longer on the current page.
+  useEffect(() => {
+    const visible = new Set(invoices.map((inv) => inv.id));
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set();
+      prev.forEach((id) => {
+        if (visible.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed || next.size !== prev.size ? next : prev;
+    });
+  }, [invoices]);
+
   useEffect(() => {
     if (!printInvoice || printTriggered.current) return undefined;
     printTriggered.current = true;
@@ -96,11 +115,61 @@ function Invoices() {
     setPrintInvoice(res.invoice);
   };
 
+  const pageIds = useMemo(() => invoices.map((inv) => inv.id), [invoices]);
+  const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const someSelected = pageIds.some((id) => selectedIds.has(id));
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      if (allSelected) return new Set();
+      return new Set(pageIds);
+    });
+  }
+
+  function toggleSelectOne(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkPrint() {
+    if (selectedIds.size === 0 || bulkLoading) return;
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const loaded = [];
+    for (const id of ids) {
+      const res = await getApi().getInvoiceForPrint({ id });
+      if (res.ok === true && res.invoice) {
+        loaded.push(res.invoice);
+      } else {
+        notifyError(res.error || 'Could not load an invoice for printing.');
+        setBulkLoading(false);
+        return;
+      }
+    }
+    setBulkLoading(false);
+    setBulkPrintInvoices(loaded);
+    setBulkPrintOpen(true);
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
 
   return (
     <div className="products-page">
       {printInvoice ? <InvoicePrintView invoice={printInvoice} /> : null}
+
+      <BulkPrintModal
+        open={bulkPrintOpen}
+        invoices={bulkPrintInvoices}
+        title={`Bulk print (${bulkPrintInvoices.length})`}
+        onClose={() => {
+          setBulkPrintOpen(false);
+          setBulkPrintInvoices([]);
+        }}
+      />
 
       <div className="products-page-header">
         <div>
@@ -187,6 +256,24 @@ function Invoices() {
           ) : null}
         </div>
 
+        {selectedIds.size > 0 ? (
+          <div className="bulk-actions-bar">
+            <span className="bulk-actions-meta">
+              <strong>{selectedIds.size}</strong> selected
+            </span>
+            <div className="bulk-actions-btns">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={bulkLoading}
+                onClick={handleBulkPrint}
+              >
+                <FaIcon icon="print" /> {bulkLoading ? 'Loading…' : 'Print'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="table-wrap">
           {loading ? (
             <p className="empty-hint">Loading…</p>
@@ -196,6 +283,18 @@ function Invoices() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="table-select-col">
+                    <input
+                      type="checkbox"
+                      className="pretty-check"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected && !allSelected;
+                      }}
+                      onChange={toggleSelectAll}
+                      aria-label="Select all invoices on this page"
+                    />
+                  </th>
                   <th>Invoice #</th>
                   <th>Order</th>
                   <th>Amount</th>
@@ -208,6 +307,15 @@ function Invoices() {
               <tbody>
                 {invoices.map((inv) => (
                   <tr key={inv.id}>
+                    <td className="table-select-col">
+                      <input
+                        type="checkbox"
+                        className="pretty-check"
+                        checked={selectedIds.has(inv.id)}
+                        onChange={() => toggleSelectOne(inv.id)}
+                        aria-label={`Select invoice ${inv.invoice_number}`}
+                      />
+                    </td>
                     <td className="cell-mono table-strong">{inv.invoice_number}</td>
                     <td className="cell-mono">{inv.order_number || '—'}</td>
                     <td className="cell-mono">{pkr.format(Number(inv.amount) || 0)}</td>

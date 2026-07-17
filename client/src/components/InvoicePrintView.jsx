@@ -1,6 +1,5 @@
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { APP_NAME } from '../appName';
 import { parseDbTimestamp } from '../RelativeTime';
 import postFormPage1 from '../assets/print/post-form-page-1.png';
 import postFormPage2 from '../assets/print/post-form-page-2.png';
@@ -159,18 +158,57 @@ function PostFormPage2Overlay({ invoice, totals }) {
         <p className="post-form-p2-field post-form-p2-tracking">{trackingId}</p>
       ) : null}
       <p className="post-form-p2-field post-form-p2-order-date">{orderDate}</p>
-        <p className="post-form-p2-field post-form-p2-recipient-bottom">{recipient}</p>
+      <p className="post-form-p2-field post-form-p2-recipient-bottom">{recipient}</p>
     </div>
   );
 }
 
+/** @typedef {{ formFront?: boolean; formBack?: boolean; invoice?: boolean }} PrintPageOptions */
+
+export const DEFAULT_PRINT_OPTIONS = {
+  formFront: true,
+  formBack: true,
+  invoice: true,
+};
+
 /**
- * Printable invoice layout — full A4, shown only during window.print().
- * @param {{ invoice: import('../../global').InvoiceForPrint }} props
+ * Full A4 sheet for one content type (used for single print and bulk grid cells).
+ * @param {{
+ *   invoice: import('../../global').InvoiceForPrint;
+ *   kind: 'formFront' | 'formBack' | 'invoice';
+ *   embedded?: boolean;
+ * }} props
  */
-export function InvoicePrintView({ invoice }) {
+export function InvoicePrintSheet({ invoice, kind, embedded = false }) {
   const lines = normalizeLines(invoice.items);
   const totals = buildTotals(lines, invoice);
+  const pageClass = embedded
+    ? 'invoice-print-sheet invoice-print-form-page'
+    : 'invoice-print-page invoice-print-form-page';
+
+  if (kind === 'formFront') {
+    return (
+      <div className={pageClass}>
+        <img src={postFormPage1} alt="" className="invoice-print-form-img" />
+      </div>
+    );
+  }
+
+  if (kind === 'formBack') {
+    return (
+      <div className={pageClass}>
+        <div className="invoice-print-form-canvas">
+          <img src={postFormPage2} alt="" className="invoice-print-form-img" />
+          <PostFormPage2Overlay invoice={invoice} totals={totals} />
+        </div>
+      </div>
+    );
+  }
+
+  const sheetClass = embedded
+    ? 'invoice-print-sheet invoice-print-invoice-page'
+    : 'invoice-print-page invoice-print-invoice-page';
+
   const issuedAt = formatInvoiceDate(invoice.created_at);
   const trackingId = String(invoice.tracking_id || '').trim();
   const orderNo = String(invoice.order_number || '').trim();
@@ -183,18 +221,8 @@ export function InvoicePrintView({ invoice }) {
   const urduNotice =
     'محترم پوسٹ مین: اگر پیکٹ کو کسٹمر تک نہ پہنچایا گیا اور بغیر واضح عذر کے واپس کیا گیا تو شکایت درج کرائی جا سکتی ہے۔ شکریہ\nفون لازمی کر کے اطلاع دیں۔';
 
-  const content = (
-    <div className="invoice-print-root" aria-hidden="true">
-      <div className="invoice-print-page invoice-print-form-page">
-        <img src={postFormPage1} alt="" className="invoice-print-form-img" />
-      </div>
-      <div className="invoice-print-page invoice-print-form-page">
-        <div className="invoice-print-form-canvas">
-          <img src={postFormPage2} alt="" className="invoice-print-form-img" />
-          <PostFormPage2Overlay invoice={invoice} totals={totals} />
-        </div>
-      </div>
-      <div className="invoice-print-page invoice-print-invoice-page">
+  return (
+    <div className={sheetClass}>
       <article className="inv3-sheet">
         <header className="inv3-header">
           <div className="inv3-header-col">
@@ -314,9 +342,150 @@ export function InvoicePrintView({ invoice }) {
           </div>
         </div>
       </article>
+    </div>
+  );
+}
+
+function chunkItems(items, size) {
+  const out = [];
+  const n = Math.max(1, size);
+  for (let i = 0; i < items.length; i += n) {
+    out.push(items.slice(i, i + n));
+  }
+  return out;
+}
+
+function gridMeta(perPage) {
+  const cols = 2;
+  const rows = Math.ceil(perPage / cols);
+  return { cols, rows };
+}
+
+/**
+ * Renders one A4 page holding up to `perPage` full-size sheets scaled into a 2-column grid.
+ * Full sheets are rendered at A4 then scaled — overlay positions stay pixel-accurate relative to the form.
+ */
+function BulkGridPage({ invoices, kind, perPage, pageKey }) {
+  const { cols, rows } = gridMeta(perPage);
+  const cells = Array.from({ length: rows * cols }, (_, i) => invoices[i] || null);
+
+  // Max printer safe margin (0.5in). Cell pad 10px. Scale fills the inner flex frame.
+  const SAFE_MM = 12.7;
+  const GAP_MM = 2;
+  const PAD_MM = (10 / 96) * 25.4; // 10px → mm
+  const BORDER_MM = 0.5;
+  const usableW = 210 - SAFE_MM * 2;
+  const usableH = 297 - SAFE_MM * 2;
+  const cellW = (usableW - (cols - 1) * GAP_MM) / cols;
+  const cellH = (usableH - (rows - 1) * GAP_MM) / rows;
+  const frameW = cellW - PAD_MM * 2 - BORDER_MM * 2;
+  const frameH = cellH - PAD_MM * 2 - BORDER_MM * 2;
+  const scale = Math.min(frameW / 210, frameH / 297);
+
+  return (
+    <div
+      className="invoice-print-page bulk-print-grid-page"
+      data-cols={cols}
+      data-rows={rows}
+      style={{ '--bulk-cols': cols, '--bulk-rows': rows, '--bulk-scale': scale }}
+    >
+      <div className="bulk-print-grid">
+        {cells.map((inv, i) => (
+          <div
+            key={`${pageKey}-cell-${i}`}
+            className={`bulk-print-cell${inv ? ' is-filled' : ' is-empty'}`}
+          >
+            {inv ? (
+              <div className="bulk-print-cell-frame">
+                <div className="bulk-print-cell-inner">
+                  <InvoicePrintSheet invoice={inv} kind={kind} embedded />
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ))}
       </div>
     </div>
   );
+}
 
+/**
+ * Build print pages for many invoices according to options + per-page density.
+ * @param {{
+ *   invoices: import('../../global').InvoiceForPrint[];
+ *   options?: PrintPageOptions;
+ *   perPage?: number;
+ * }} props
+ */
+export function buildBulkPrintPages({ invoices, options = DEFAULT_PRINT_OPTIONS, perPage = 1 }) {
+  const list = Array.isArray(invoices) ? invoices.filter(Boolean) : [];
+  const n = Math.min(6, Math.max(1, Number(perPage) || 1));
+  const kinds = [];
+  if (options.formFront) kinds.push('formFront');
+  if (options.formBack) kinds.push('formBack');
+  if (options.invoice) kinds.push('invoice');
+
+  const pages = [];
+  if (list.length === 0 || kinds.length === 0) return pages;
+
+  const chunks = chunkItems(list, n);
+  chunks.forEach((chunk, chunkIdx) => {
+    kinds.forEach((kind) => {
+      if (n === 1) {
+        chunk.forEach((inv, i) => {
+          pages.push(
+            <InvoicePrintSheet
+              key={`p-${chunkIdx}-${kind}-${inv.id ?? i}`}
+              invoice={inv}
+              kind={kind}
+            />,
+          );
+        });
+      } else {
+        pages.push(
+          <BulkGridPage
+            key={`g-${chunkIdx}-${kind}`}
+            pageKey={`g-${chunkIdx}-${kind}`}
+            invoices={chunk}
+            kind={kind}
+            perPage={n}
+          />,
+        );
+      }
+    });
+  });
+  return pages;
+}
+
+/**
+ * Printable invoice layout — full A4, shown only during window.print().
+ * @param {{
+ *   invoice?: import('../../global').InvoiceForPrint;
+ *   invoices?: import('../../global').InvoiceForPrint[];
+ *   options?: PrintPageOptions;
+ *   perPage?: number;
+ *   preview?: boolean;
+ * }} props
+ */
+export function InvoicePrintView({
+  invoice,
+  invoices,
+  options = DEFAULT_PRINT_OPTIONS,
+  perPage = 1,
+  preview = false,
+}) {
+  const list = invoices?.length ? invoices : invoice ? [invoice] : [];
+  const pages = buildBulkPrintPages({ invoices: list, options, perPage });
+
+  const content = (
+    <div
+      className={preview ? 'invoice-print-root invoice-print-root-preview' : 'invoice-print-root'}
+      aria-hidden={preview ? undefined : 'true'}
+    >
+      {pages}
+    </div>
+  );
+
+  if (preview) return content;
   return createPortal(content, document.body);
 }

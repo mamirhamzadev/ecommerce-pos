@@ -2045,3 +2045,303 @@ select {
   background: rgba(148, 163, 184, 0.65);
 }
 
+/* —— Bulk selection bar —— */
+
+.bulk-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.75rem 0 0.25rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.bulk-actions-meta {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.bulk-actions-meta strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.bulk-actions-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.table-select-col {
+  width: 2.75rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.table-select-col input[type='checkbox'] {
+  margin: 0;
+}
+
+/* —— Custom pretty checkbox (multi-select + bulk print) —— */
+
+.pretty-check {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  vertical-align: middle;
+  cursor: pointer;
+  border: 1.5px solid rgba(148, 163, 184, 0.4);
+  border-radius: 7px;
+  background:
+    linear-gradient(160deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+
+.pretty-check:hover {
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 3px rgba(56, 189, 248, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.pretty-check:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.pretty-check:active {
+  transform: scale(0.94);
+}
+
+.pretty-check:checked,
+.pretty-check:indeterminate {
+  border-color: transparent;
+  background: linear-gradient(145deg, #7dd3fc 0%, var(--accent) 45%, var(--accent-strong) 100%);
+  box-shadow:
+    0 0 0 1px rgba(14, 165, 233, 0.35),
+    0 4px 14px rgba(14, 165, 233, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.pretty-check:checked:hover,
+.pretty-check:indeterminate:hover {
+  box-shadow:
+    0 0 0 3px rgba(56, 189, 248, 0.18),
+    0 4px 16px rgba(14, 165, 233, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.pretty-check::after {
+  content: '';
+  position: absolute;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.pretty-check:checked::after {
+  opacity: 1;
+  width: 0.28rem;
+  height: 0.52rem;
+  border: solid #0c1222;
+  border-width: 0 2.2px 2.2px 0;
+  transform: translateY(-8%) rotate(45deg) scale(1);
+}
+
+.pretty-check:indeterminate::after {
+  opacity: 1;
+  width: 0.55rem;
+  height: 2.2px;
+  border: none;
+  border-radius: 2px;
+  background: #0c1222;
+  transform: scale(1);
+}
+
+.pretty-check:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* —— Bulk print modal —— */
+
+.bulk-print-modal-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 100%);
+  max-height: min(92vh, 860px);
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(145deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.99));
+  box-shadow: var(--shadow-lg);
+  padding: 0;
+}
+
+.bulk-print-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.bulk-print-modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.bulk-print-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.bulk-print-modal-close:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.bulk-print-modal-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bulk-print-modal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.bulk-print-toolbar-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.bulk-print-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.bulk-print-pill {
+  min-width: 2.1rem;
+  height: 2.1rem;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.bulk-print-pill:hover {
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.bulk-print-pill.is-active {
+  background: rgba(14, 165, 233, 0.22);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #7dd3fc;
+}
+
+.bulk-print-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.15rem;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 1.15rem;
+}
+
+.bulk-print-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.bulk-print-check input.pretty-check {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.bulk-print-preview-wrap {
+  flex: 1 1 auto;
+  min-height: 220px;
+  overflow: auto;
+  padding: 1rem 1.25rem;
+  background: rgba(2, 6, 23, 0.35);
+}
+
+.bulk-print-preview-empty {
+  margin: 2rem 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.bulk-print-preview-scaler {
+  display: flex;
+  justify-content: center;
+  /* Room for CSS-scaled A4 preview (scale 0.42 ≈ 88mm tall per page) */
+  min-height: 140px;
+  padding-bottom: 0.5rem;
+}
+
+.bulk-print-modal-footer {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+

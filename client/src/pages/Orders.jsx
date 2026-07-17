@@ -16,6 +16,7 @@ import {
   twAlertError,
   twBtnGhostSm,
   twBtnPrimarySm,
+  twBtnDangerSm,
   twCard,
   twCellMono,
   twCustomerCell,
@@ -122,6 +123,7 @@ import {
 } from '../lib/tw';
 import { RelativeTime } from '../RelativeTime';
 import { FaIcon } from '../components/FaIcon';
+import { BulkPrintModal } from '../components/BulkPrintModal';
 import { InvoicePrintView, preloadPrintFormPages } from '../components/InvoicePrintView';
 
 const pkr = new Intl.NumberFormat('en-PK', {
@@ -761,6 +763,10 @@ function Orders() {
   const [viewLinesOrder, setViewLinesOrder] = useState(null);
   const [printInvoice, setPrintInvoice] = useState(null);
   const [printingOrderId, setPrintingOrderId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
+  const [bulkPrintInvoices, setBulkPrintInvoices] = useState([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const printTriggered = useRef(false);
 
   const orderEditTokenRef = useRef(0);
@@ -821,6 +827,20 @@ function Orders() {
   useEffect(() => {
     loadList(page, pageSize);
   }, [page, pageSize, loadList]);
+
+  // Drop selections that are no longer on the current page.
+  useEffect(() => {
+    const visible = new Set(orders.map((o) => o.id));
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set();
+      prev.forEach((id) => {
+        if (visible.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed || next.size !== prev.size ? next : prev;
+    });
+  }, [orders]);
 
   useEffect(() => {
     if (!printInvoice || printTriggered.current) return undefined;
@@ -1149,6 +1169,37 @@ function Orders() {
     await loadList(page, pageSize);
   }
 
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0 || bulkLoading) return;
+    const n = selectedIds.size;
+    if (
+      !window.confirm(
+        `Delete ${n} selected order${n === 1 ? '' : 's'}? Related invoices will also be deleted.`,
+      )
+    ) {
+      return;
+    }
+    setBulkLoading(true);
+    setListError('');
+    const ids = [...selectedIds];
+    let failed = 0;
+    for (const id of ids) {
+      const res = await getApi().deleteOrder({ id });
+      if (res.ok !== true) {
+        failed += 1;
+        notifyError(res.error || 'Delete failed.');
+      }
+    }
+    setBulkLoading(false);
+    setSelectedIds(new Set());
+    if (failed === 0) {
+      notifySuccess(n === 1 ? 'Order deleted.' : `${n} orders deleted.`);
+    } else if (failed < n) {
+      notifySuccess(`${n - failed} deleted; ${failed} failed.`);
+    }
+    await loadList(page, pageSize);
+  }
+
   async function handlePrintInvoice(o) {
     if (printingOrderId != null) return;
     setPrintingOrderId(o.id);
@@ -1159,6 +1210,47 @@ function Orders() {
       return;
     }
     setPrintInvoice(res.invoice);
+  }
+
+  async function handleBulkPrint() {
+    if (selectedIds.size === 0 || bulkLoading) return;
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const loaded = [];
+    for (const id of ids) {
+      const res = await getApi().getInvoiceForPrint({ orderId: id });
+      if (res.ok === true && res.invoice) {
+        loaded.push(res.invoice);
+      } else {
+        notifyError(res.error || 'Could not load an invoice for printing.');
+        setBulkLoading(false);
+        return;
+      }
+    }
+    setBulkLoading(false);
+    setBulkPrintInvoices(loaded);
+    setBulkPrintOpen(true);
+  }
+
+  const pageOrderIds = orders.map((o) => o.id);
+  const allOrdersSelected =
+    pageOrderIds.length > 0 && pageOrderIds.every((id) => selectedIds.has(id));
+  const someOrdersSelected = pageOrderIds.some((id) => selectedIds.has(id));
+
+  function toggleSelectAllOrders() {
+    setSelectedIds((prev) => {
+      if (allOrdersSelected) return new Set();
+      return new Set(pageOrderIds);
+    });
+  }
+
+  function toggleSelectOrder(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   async function handleStatusChange(o, nextStatus) {
@@ -1274,6 +1366,16 @@ function Orders() {
   return (
     <div className={twProductsPage}>
       {printInvoice ? <InvoicePrintView invoice={printInvoice} /> : null}
+
+      <BulkPrintModal
+        open={bulkPrintOpen}
+        invoices={bulkPrintInvoices}
+        title={`Bulk print (${bulkPrintInvoices.length})`}
+        onClose={() => {
+          setBulkPrintOpen(false);
+          setBulkPrintInvoices([]);
+        }}
+      />
 
       <div className={twProductsPageHeader}>
         <div>
@@ -1535,6 +1637,32 @@ function Orders() {
           </div>
         ) : null}
 
+        {selectedIds.size > 0 ? (
+          <div className="bulk-actions-bar">
+            <span className="bulk-actions-meta">
+              <strong>{selectedIds.size}</strong> selected
+            </span>
+            <div className="bulk-actions-btns">
+              <button
+                type="button"
+                className={twBtnGhostSm}
+                disabled={bulkLoading}
+                onClick={handleBulkPrint}
+              >
+                <FaIcon icon="print" /> {bulkLoading ? 'Loading…' : 'Print'}
+              </button>
+              <button
+                type="button"
+                className={twBtnDangerSm}
+                disabled={bulkLoading}
+                onClick={handleBulkDelete}
+              >
+                <FaIcon icon="trash-can" /> Delete
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className={twOrdersListTableWrap}>
           {loading ? (
             <p className={twEmptyHint}>Loading…</p>
@@ -1548,6 +1676,18 @@ function Orders() {
             <table className={twOrdersDataTable}>
               <thead>
                 <tr>
+                  <th className="table-select-col">
+                    <input
+                      type="checkbox"
+                      className="pretty-check"
+                      checked={allOrdersSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someOrdersSelected && !allOrdersSelected;
+                      }}
+                      onChange={toggleSelectAllOrders}
+                      aria-label="Select all orders on this page"
+                    />
+                  </th>
                   <th className={twOrdersColOrder}>Order #</th>
                   <th className={twOrdersColTracking}>Tracking ID</th>
                   <th className={twOrdersColLines}>Items</th>
@@ -1564,6 +1704,15 @@ function Orders() {
                   const rowTag = normalizeTag(o.tag);
                   return (
                   <tr key={o.id} className={rowTag ? TAG_ROW_BG[rowTag] : undefined}>
+                    <td className="table-select-col">
+                      <input
+                        type="checkbox"
+                        className="pretty-check"
+                        checked={selectedIds.has(o.id)}
+                        onChange={() => toggleSelectOrder(o.id)}
+                        aria-label={`Select order ${o.order_number}`}
+                      />
+                    </td>
                     <td className={`${twOrdersColOrder} ${twTableStrong} ${twCellMono}`}>{o.order_number}</td>
                     <td
                       className={`${twOrdersColTracking} ${twCellMono}`}
