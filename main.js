@@ -810,6 +810,25 @@ ipcMain.handle("invoices:listPaged", async (_event, payload) => {
   };
 });
 
+ipcMain.handle("invoices:listIds", async (_event, payload) => {
+  if (!currentSession) {
+    return { ok: false, error: "Forbidden." };
+  }
+  const dateFrom = normalizeDateInput(payload?.dateFrom);
+  const dateTo = normalizeDateInput(payload?.dateTo);
+  const ids = invoiceQueries.listInvoiceIds(db, { dateFrom, dateTo });
+  return { ok: true, ids };
+});
+
+ipcMain.handle("invoices:listByIds", async (_event, payload) => {
+  if (!currentSession) {
+    return { ok: false, error: "Forbidden." };
+  }
+  const ids = Array.isArray(payload?.ids) ? payload.ids : [];
+  const invoices = invoiceQueries.listInvoicesByIds(db, ids);
+  return { ok: true, invoices };
+});
+
 ipcMain.handle("invoices:getForPrint", async (_event, { id, orderId }) => {
   if (!currentSession) {
     return { ok: false, error: "Forbidden." };

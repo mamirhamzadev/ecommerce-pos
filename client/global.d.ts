@@ -28,6 +28,23 @@ type UserPublic = {
   role: string;
 };
 
+export type InvoiceListRow = {
+  id: number;
+  invoice_number: string;
+  amount: number;
+  status: string;
+  order_id: number | null;
+  user_id: number | null;
+  created_at: string;
+  order_number: string | null;
+  customer_name: string | null;
+  customer_city: string | null;
+  delivery_charges: number | null;
+  tracking_id: string | null;
+  user_username: string | null;
+  total_weight_g: number | null;
+};
+
 export type InvoiceForPrint = {
   id: number;
   invoice_number: string;
@@ -115,6 +132,8 @@ declare global {
           | 'orders:patchStatus'
           | 'orders:delete'
           | 'invoices:listPaged'
+          | 'invoices:listIds'
+          | 'invoices:listByIds'
           | 'invoices:getForPrint'
           | 'invoices:deleteAll'
           | 'app:updaterInfo'
@@ -346,21 +365,21 @@ declare global {
       }) => Promise<
         | {
             ok: true;
-            invoices: Array<{
-              id: number;
-              invoice_number: string;
-              amount: number;
-              status: string;
-              order_id: number | null;
-              user_id: number | null;
-              created_at: string;
-              order_number: string | null;
-              user_username: string | null;
-            }>;
+            invoices: InvoiceListRow[];
             total: number;
             page: number;
             pageSize: number;
           }
+        | { ok: false; error?: string }
+      >;
+      listInvoiceIds: (payload?: {
+        dateFrom?: string;
+        dateTo?: string;
+      }) => Promise<{ ok: true; ids: number[] } | { ok: false; error?: string }>;
+      listInvoicesByIds: (payload: {
+        ids: number[];
+      }) => Promise<
+        | { ok: true; invoices: InvoiceListRow[] }
         | { ok: false; error?: string }
       >;
       getInvoiceForPrint: (payload: { id?: number; orderId?: number }) => Promise<

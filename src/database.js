@@ -694,6 +694,17 @@ const invoiceQueries = {
     }
   },
 
+  /** Shared SELECT for invoice list / summary rows (joins order + total weight). */
+  _listSelectSql() {
+    return `SELECT i.id, i.invoice_number, i.amount, i.status, i.order_id, i.user_id, i.created_at,
+                o.order_number, o.customer_name, o.customer_city, o.delivery_charges, o.tracking_id,
+                u.username AS user_username,
+                (SELECT COALESCE(SUM(oi.weight_g), 0) FROM order_items oi WHERE oi.order_id = i.order_id) AS total_weight_g
+         FROM invoices i
+         LEFT JOIN orders o ON o.id = i.order_id
+         LEFT JOIN users u ON u.id = i.user_id`;
+  },
+
   listInvoicesPaged(db, page, pageSize, filters = {}) {
     const { whereSql, params: whereParams } = buildInvoiceListWhere(filters);
     const total = db
@@ -704,18 +715,55 @@ const invoiceQueries = {
     const offset = (safePage - 1) * pageSize;
     const rows = db
       .prepare(
-        `SELECT i.id, i.invoice_number, i.amount, i.status, i.order_id, i.user_id, i.created_at,
-                o.order_number,
-                u.username AS user_username
-         FROM invoices i
-         LEFT JOIN orders o ON o.id = i.order_id
-         LEFT JOIN users u ON u.id = i.user_id
+        `${invoiceQueries._listSelectSql()}
          ${whereSql}
          ORDER BY datetime(i.created_at) DESC, i.id DESC
          LIMIT ? OFFSET ?`,
       )
       .all(...whereParams, pageSize, offset);
     return { rows, total, page: safePage, pageSize };
+  },
+
+  /** All invoice IDs matching list filters (for select-all across pages). */
+  listInvoiceIds(db, filters = {}) {
+    const { whereSql, params: whereParams } = buildInvoiceListWhere(filters);
+    const rows = db
+      .prepare(
+        `SELECT i.id
+         FROM invoices i
+         ${whereSql}
+         ORDER BY datetime(i.created_at) DESC, i.id DESC`,
+      )
+      .all(...whereParams);
+    return rows.map((r) => r.id);
+  },
+
+  /** Summary rows for the given invoice IDs (preserves input order). */
+  listInvoicesByIds(db, ids) {
+    const unique = [];
+    const seen = new Set();
+    for (const raw of Array.isArray(ids) ? ids : []) {
+      const id = Number(raw);
+      if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+      seen.add(id);
+      unique.push(id);
+    }
+    if (unique.length === 0) return [];
+
+    const byId = new Map();
+    const CHUNK = 400;
+    for (let i = 0; i < unique.length; i += CHUNK) {
+      const chunk = unique.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = db
+        .prepare(
+          `${invoiceQueries._listSelectSql()}
+           WHERE i.id IN (${placeholders})`,
+        )
+        .all(...chunk);
+      for (const row of rows) byId.set(row.id, row);
+    }
+    return unique.map((id) => byId.get(id)).filter(Boolean);
   },
 
   deleteByOrderId(db, orderId) {

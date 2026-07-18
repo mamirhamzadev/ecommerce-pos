@@ -3,7 +3,7 @@ import { getApi } from '../api';
 import { FaIcon } from '../components/FaIcon';
 import { BulkPrintModal } from '../components/BulkPrintModal';
 import { InvoicePrintView, preloadPrintFormPages } from '../components/InvoicePrintView';
-import { RelativeTime } from '../RelativeTime';
+import { InvoiceSummaryPrintView } from '../components/InvoiceSummaryPrintView';
 import { notifyError } from '../lib/notify';
 import {
   getStoredPageSize,
@@ -11,11 +11,23 @@ import {
   setStoredPageSize,
 } from '../lib/pageSize';
 
-const pkr = new Intl.NumberFormat('en-PK', {
-  style: 'currency',
-  currency: 'PKR',
+const amountFmt = new Intl.NumberFormat('en-PK', {
   maximumFractionDigits: 2,
 });
+
+function formatAmount(n) {
+  return amountFmt.format(Number(n) || 0);
+}
+
+function formatWeightG(g) {
+  const n = Number(g);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  if (n >= 1000) {
+    const kg = n / 1000;
+    return `${kg.toFixed(kg % 1 === 0 ? 0 : 2)} kg`;
+  }
+  return `${n % 1 === 0 ? n : n.toFixed(2)} g`;
+}
 
 function Invoices() {
   const [page, setPage] = useState(1);
@@ -32,7 +44,10 @@ function Invoices() {
   const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
   const [bulkPrintInvoices, setBulkPrintInvoices] = useState([]);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [summaryPrintRows, setSummaryPrintRows] = useState(null);
+  const [selectAllLoading, setSelectAllLoading] = useState(false);
   const printTriggered = useRef(false);
+  const summaryPrintTriggered = useRef(false);
 
   const loadList = useCallback(async (p, ps) => {
     setListError('');
@@ -69,19 +84,10 @@ function Invoices() {
     loadList(page, pageSize);
   }, [page, pageSize, loadList]);
 
-  // Drop selections that are no longer on the current page.
+  // Drop selection when date filters change so prints only use the current result set.
   useEffect(() => {
-    const visible = new Set(invoices.map((inv) => inv.id));
-    setSelectedIds((prev) => {
-      let changed = false;
-      const next = new Set();
-      prev.forEach((id) => {
-        if (visible.has(id)) next.add(id);
-        else changed = true;
-      });
-      return changed || next.size !== prev.size ? next : prev;
-    });
-  }, [invoices]);
+    setSelectedIds(new Set());
+  }, [filterDateFrom, filterDateTo]);
 
   useEffect(() => {
     if (!printInvoice || printTriggered.current) return undefined;
@@ -103,6 +109,23 @@ function Invoices() {
     };
   }, [printInvoice]);
 
+  useEffect(() => {
+    if (!summaryPrintRows || summaryPrintTriggered.current) return undefined;
+    summaryPrintTriggered.current = true;
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        window.print();
+        setSummaryPrintRows(null);
+        summaryPrintTriggered.current = false;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [summaryPrintRows]);
+
   const handlePrint = async (inv) => {
     if (printingId != null) return;
     setPrintingId(inv.id);
@@ -118,11 +141,17 @@ function Invoices() {
   const pageIds = useMemo(() => invoices.map((inv) => inv.id), [invoices]);
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
   const someSelected = pageIds.some((id) => selectedIds.has(id));
+  const allMatchingSelected = total > 0 && selectedIds.size === total;
 
   function toggleSelectAll() {
     setSelectedIds((prev) => {
-      if (allSelected) return new Set();
-      return new Set(pageIds);
+      const next = new Set(prev);
+      if (allSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
     });
   }
 
@@ -133,6 +162,25 @@ function Invoices() {
       else next.add(id);
       return next;
     });
+  }
+
+  async function handleSelectAllMatching() {
+    if (selectAllLoading || total === 0) return;
+    setSelectAllLoading(true);
+    const res = await getApi().listInvoiceIds({
+      dateFrom: filterDateFrom,
+      dateTo: filterDateTo,
+    });
+    setSelectAllLoading(false);
+    if (res.ok !== true) {
+      notifyError(res.error || 'Could not select all invoices.');
+      return;
+    }
+    setSelectedIds(new Set(res.ids || []));
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
   }
 
   async function handleBulkPrint() {
@@ -155,11 +203,26 @@ function Invoices() {
     setBulkPrintOpen(true);
   }
 
+  async function handlePrintSummary() {
+    if (selectedIds.size === 0 || bulkLoading) return;
+    setBulkLoading(true);
+    const res = await getApi().listInvoicesByIds({ ids: [...selectedIds] });
+    setBulkLoading(false);
+    if (res.ok !== true) {
+      notifyError(res.error || 'Could not load invoices for summary print.');
+      return;
+    }
+    summaryPrintTriggered.current = false;
+    setSummaryPrintRows(res.invoices || []);
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const rowOffset = (page - 1) * pageSize;
 
   return (
     <div className="products-page">
       {printInvoice ? <InvoicePrintView invoice={printInvoice} /> : null}
+      {summaryPrintRows ? <InvoiceSummaryPrintView invoices={summaryPrintRows} /> : null}
 
       <BulkPrintModal
         open={bulkPrintOpen}
@@ -260,15 +323,67 @@ function Invoices() {
           <div className="bulk-actions-bar">
             <span className="bulk-actions-meta">
               <strong>{selectedIds.size}</strong> selected
+              {allMatchingSelected ? (
+                <>
+                  {' '}
+                  (all{hasActiveFilters ? ' matching' : ''})
+                </>
+              ) : null}
             </span>
             <div className="bulk-actions-btns">
+              {!allMatchingSelected && total > selectedIds.size ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={selectAllLoading}
+                  onClick={handleSelectAllMatching}
+                >
+                  {selectAllLoading
+                    ? 'Selecting…'
+                    : `Select all ${total}${hasActiveFilters ? ' matching' : ''}`}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={bulkLoading}
+                onClick={handlePrintSummary}
+              >
+                <FaIcon icon="list" /> {bulkLoading ? 'Loading…' : 'Print summary'}
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
                 disabled={bulkLoading}
                 onClick={handleBulkPrint}
               >
-                <FaIcon icon="print" /> {bulkLoading ? 'Loading…' : 'Print'}
+                <FaIcon icon="print" /> {bulkLoading ? 'Loading…' : 'Print invoices'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={bulkLoading || selectAllLoading}
+                onClick={clearSelection}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        ) : total > pageIds.length ? (
+          <div className="bulk-actions-bar">
+            <span className="bulk-actions-meta">
+              Header checkbox selects this page only.
+            </span>
+            <div className="bulk-actions-btns">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={selectAllLoading || total === 0}
+                onClick={handleSelectAllMatching}
+              >
+                {selectAllLoading
+                  ? 'Selecting…'
+                  : `Select all ${total} invoice${total === 1 ? '' : 's'}${hasActiveFilters ? ' (filtered)' : ''}`}
               </button>
             </div>
           </div>
@@ -295,17 +410,19 @@ function Invoices() {
                       aria-label="Select all invoices on this page"
                     />
                   </th>
+                  <th>#</th>
                   <th>Invoice #</th>
-                  <th>Order</th>
+                  <th>Tracking ID</th>
+                  <th>Customer</th>
+                  <th>City</th>
                   <th>Amount</th>
-                  <th>Status</th>
-                  <th>Issued by</th>
-                  <th>Created</th>
+                  <th>Delivery charges</th>
+                  <th>Total weight</th>
                   <th className="table-actions">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {invoices.map((inv) => (
+                {invoices.map((inv, idx) => (
                   <tr key={inv.id}>
                     <td className="table-select-col">
                       <input
@@ -316,14 +433,29 @@ function Invoices() {
                         aria-label={`Select invoice ${inv.invoice_number}`}
                       />
                     </td>
-                    <td className="cell-mono table-strong">{inv.invoice_number}</td>
-                    <td className="cell-mono">{inv.order_number || '—'}</td>
-                    <td className="cell-mono">{pkr.format(Number(inv.amount) || 0)}</td>
-                    <td>{inv.status || '—'}</td>
-                    <td>{inv.user_username || '—'}</td>
-                    <td className="cell-mono">
-                      <RelativeTime value={inv.created_at} />
+                    <td className="cell-mono">{rowOffset + idx + 1}</td>
+                    <td className="cell-mono table-strong whitespace-nowrap">
+                      {inv.invoice_number}
                     </td>
+                    <td
+                      className="cell-mono whitespace-nowrap"
+                      title={
+                        inv.tracking_id && String(inv.tracking_id).trim()
+                          ? String(inv.tracking_id).trim()
+                          : undefined
+                      }
+                    >
+                      {inv.tracking_id && String(inv.tracking_id).trim()
+                        ? String(inv.tracking_id).trim()
+                        : '—'}
+                    </td>
+                    <td>{String(inv.customer_name || '').trim() || '—'}</td>
+                    <td>{String(inv.customer_city || '').trim() || '—'}</td>
+                    <td className="cell-mono">{formatAmount(inv.amount)}</td>
+                    <td className="cell-mono">
+                      {formatAmount(inv.delivery_charges)}
+                    </td>
+                    <td className="cell-mono">{formatWeightG(inv.total_weight_g)}</td>
                     <td className="table-actions">
                       <div
                         className="table-action-group"

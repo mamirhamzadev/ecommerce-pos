@@ -1,6 +1,8 @@
 /** @param {Window['api']} raw */
 function wrapApi(raw) {
   const needsInvoicesPatch = typeof raw.listInvoicesPaged !== 'function';
+  const needsInvoiceIdsPatch = typeof raw.listInvoiceIds !== 'function';
+  const needsInvoicesByIdsPatch = typeof raw.listInvoicesByIds !== 'function';
   const needsInvoicePrintPatch = typeof raw.getInvoiceForPrint !== 'function';
   const needsDeleteAllInvoicesPatch = typeof raw.deleteAllInvoices !== 'function';
   const needsPickerPatch = typeof raw.listProductsPicker !== 'function';
@@ -21,6 +23,8 @@ function wrapApi(raw) {
   const needsSubscriptionPatch = typeof raw.checkSubscriptionStatus !== 'function';
   if (
     !needsInvoicesPatch &&
+    !needsInvoiceIdsPatch &&
+    !needsInvoicesByIdsPatch &&
     !needsInvoicePrintPatch &&
     !needsDeleteAllInvoicesPatch &&
     !needsPickerPatch &&
@@ -40,6 +44,16 @@ function wrapApi(raw) {
       ...(needsInvoicesPatch
         ? {
             listInvoicesPaged: (payload) => raw.invoke('invoices:listPaged', payload),
+          }
+        : {}),
+      ...(needsInvoiceIdsPatch
+        ? {
+            listInvoiceIds: (payload) => raw.invoke('invoices:listIds', payload),
+          }
+        : {}),
+      ...(needsInvoicesByIdsPatch
+        ? {
+            listInvoicesByIds: (payload) => raw.invoke('invoices:listByIds', payload),
           }
         : {}),
       ...(needsInvoicePrintPatch
@@ -111,6 +125,26 @@ function wrapApi(raw) {
             Promise.reject(
               new Error(
                 'Invoices list requires a full app restart after updating preload.',
+              ),
+            ),
+        }
+      : {}),
+    ...(needsInvoiceIdsPatch
+      ? {
+          listInvoiceIds: () =>
+            Promise.reject(
+              new Error(
+                'Select-all invoices requires a full app restart after updating preload.',
+              ),
+            ),
+        }
+      : {}),
+    ...(needsInvoicesByIdsPatch
+      ? {
+          listInvoicesByIds: () =>
+            Promise.reject(
+              new Error(
+                'Invoice summary print requires a full app restart after updating preload.',
               ),
             ),
         }
